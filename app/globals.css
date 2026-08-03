@@ -1,0 +1,430 @@
+@import "tailwindcss";
+
+/**
+ * Ground truth for the whole site. The home page's canvas paints these same
+ * greens, so the palette lives here rather than in either component.
+ *
+ * Keep in sync with `GROWTH_TREE_PALETTE` in `components/growth-tree.tsx` —
+ * the canvas cannot read CSS variables, so the five scene colours are the one
+ * duplication in the system.
+ */
+:root {
+  --bg: #040806;
+  --bg-raised: #071009;
+  --deep: #0a3b24;
+  --mid: #2ba46a;
+  --neon: #3ff2a0;
+  --core: #d8fdea;
+
+  /* Text ramp — quiet by default, accent reserved for labels and links. */
+  --text: #e3f6ec;
+  --text-dim: #95b3a4;
+  --text-faint: #63806f;
+
+  /* Surfaces. A panel is a lift off the background plus a hairline, never a
+     drop shadow — shadows read as plastic on a near-black page. */
+  --surface: rgb(255 255 255 / 0.022);
+  --surface-hover: rgb(255 255 255 / 0.045);
+  --border: rgb(63 242 160 / 0.11);
+  --border-strong: rgb(63 242 160 / 0.24);
+
+  /* Glow, as one reusable value so every accent lights the same way. */
+  --glow-sm: 0 0 10px rgb(63 242 160 / 0.45);
+  --glow-md: 0 0 18px rgb(63 242 160 / 0.35);
+
+  --radius: 14px;
+  --radius-sm: 8px;
+
+  /* Type scale. Fluid, so the hero holds its presence down to mobile. */
+  --step-hero: clamp(3rem, 9vw, 7.5rem);
+  /**
+   * The home page's name, which lives in a narrow column rather than across the
+   * full page. Sized in `cqw` against that column, so it cannot outgrow it at
+   * any viewport — a viewport-relative size overflows as soon as the name is
+   * long, and because the name is painted with `background-clip: text` an
+   * overflowing glyph does not just stick out, it disappears.
+   */
+  --step-name: clamp(2.75rem, 16cqw, 6.5rem);
+  --step-tagline: clamp(1.25rem, 2.2vw, 1.9rem);
+  --step-title: clamp(1.15rem, 1.5vw, 1.5rem);
+  --step-body: clamp(0.95rem, 1vw, 1.05rem);
+  --step-eyebrow: 0.7rem;
+  --step-meta: 0.72rem;
+
+  /* Height of the sticky header, so pages and anchors can allow for it. */
+  --nav-h: 4.25rem;
+
+  /* One easing curve for every transition, CSS or JS. */
+  --ease-flow: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-raised: var(--bg-raised);
+  --color-deep: var(--deep);
+  --color-mid: var(--mid);
+  --color-neon: var(--neon);
+  --color-core: var(--core);
+  --color-text: var(--text);
+  --color-text-dim: var(--text-dim);
+  --color-text-faint: var(--text-faint);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-jetbrains-mono);
+  --font-display: var(--font-fraunces);
+}
+
+html {
+  background: var(--bg);
+  color-scheme: dark;
+  /* In-page anchors clear the sticky header instead of landing under it. */
+  scroll-padding-top: calc(var(--nav-h) + 1rem);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--step-body);
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  /**
+   * Nothing here should ever scroll sideways. `clip` rather than `hidden`, and
+   * on the body rather than the root: `hidden` would make this a scroll
+   * container and break the sticky header, and `clip` does not. This catches
+   * the home page's scroll-linked entrance transforms, which slide items in
+   * from a little off the right edge.
+   */
+  overflow-x: clip;
+}
+
+/**
+ * Film grain. A fixed, non-interactive layer of fractal noise over the whole
+ * page. On a near-black site it does two jobs: it gives flat panels a material
+ * texture, and it dithers the large background gradients, which otherwise band
+ * into visible steps on 8-bit displays.
+ *
+ * The noise is an inline SVG filter, so there is no asset to load. It sits
+ * above the content but below the header and any focus ring.
+ */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: rgb(63 242 160 / 0.24);
+  color: var(--core);
+}
+
+/* Thin, quiet scrollbar. The default light thumb is the loudest thing on the
+   page once everything else is this dark. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--deep) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--deep);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--mid);
+  background-clip: content-box;
+}
+
+/* ── Type voices ───────────────────────────────────────────────────────── */
+
+/* The mono voice: eyebrows, dates, counts. Wide tracking, always uppercase. */
+.eyebrow {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: var(--step-eyebrow);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--mid);
+}
+
+.meta {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: var(--step-meta);
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.display {
+  font-family: var(--font-fraunces), ui-serif, Georgia, serif;
+  font-optical-sizing: auto;
+  line-height: 0.92;
+  letter-spacing: -0.02em;
+  /* Headings break into even lines rather than leaving one orphan word. */
+  text-wrap: balance;
+}
+
+/* Body copy avoids single-word last lines. */
+.prose-flow p,
+.lead {
+  text-wrap: pretty;
+}
+
+/**
+ * Hero treatment: a vertical wash from full brightness down into the mid
+ * green, so the largest type has depth without needing a second colour.
+ * Clipped to the glyphs, with a solid fallback where that is unsupported.
+ */
+.display-wash {
+  color: var(--text);
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .display-wash {
+    background-image: linear-gradient(
+      172deg,
+      var(--core) 0%,
+      var(--text) 44%,
+      var(--mid) 128%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+/* ── Surfaces ──────────────────────────────────────────────────────────── */
+
+/**
+ * The one panel treatment on the site: a barely-there lift, a green hairline,
+ * and a soft inner highlight along the top edge that reads as light falling
+ * from above.
+ */
+.surface {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.04);
+}
+
+/**
+ * Pointer-tracking spotlight. A card sets `--mx`/`--my` from pointermove and
+ * this paints a soft radial highlight there, fading in on hover. The gradient
+ * lives on a pseudo-element so it never tints the card's own text, and behind
+ * it via a local stacking context so it cannot cover the content.
+ */
+.spotlight {
+  position: relative;
+  isolation: isolate;
+}
+
+.spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.45s var(--ease-flow);
+  background: radial-gradient(
+    20rem circle at var(--mx, 50%) var(--my, 0%),
+    rgb(63 242 160 / 0.1),
+    transparent 62%
+  );
+}
+
+.spotlight:hover::before,
+.spotlight:focus-within::before {
+  opacity: 1;
+}
+
+/* A pill for tags, stack items and counts. */
+.pill {
+  display: inline-block;
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: var(--step-meta);
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  background: var(--surface);
+  transition:
+    color 0.4s var(--ease-flow),
+    border-color 0.4s var(--ease-flow),
+    background-color 0.4s var(--ease-flow);
+}
+
+a.pill:hover,
+a.pill:focus-visible,
+.group:hover .pill {
+  color: var(--core);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: var(--step-eyebrow);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 0.85rem 1.4rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition:
+    color 0.4s var(--ease-flow),
+    background-color 0.4s var(--ease-flow),
+    border-color 0.4s var(--ease-flow),
+    box-shadow 0.4s var(--ease-flow),
+    transform 0.4s var(--ease-flow);
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+/* The one filled control on the site. Dark text on the accent, so it is the
+   brightest thing on the page and unmistakably the primary action. */
+.btn-primary {
+  color: var(--bg);
+  background: var(--neon);
+  box-shadow: var(--glow-md);
+}
+
+.btn-primary:hover {
+  background: var(--core);
+  box-shadow: 0 0 26px rgb(63 242 160 / 0.5);
+}
+
+.btn-ghost {
+  color: var(--text-dim);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.btn-ghost:hover {
+  color: var(--core);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+/* The node motif: a small dot on a spine, lighting up with its row. */
+.node {
+  display: block;
+  height: 0.375rem;
+  width: 0.375rem;
+  border-radius: 999px;
+  /* Solid, not a ring: at this size a 1px outline reads as a degree symbol
+     rather than a dot on a wire. */
+  background: var(--mid);
+  transition:
+    background-color 0.5s var(--ease-flow),
+    box-shadow 0.5s var(--ease-flow);
+}
+
+.node-lit,
+.group:hover .node,
+.group:focus-within .node {
+  background: var(--neon);
+  box-shadow: var(--glow-sm);
+}
+
+/**
+ * Underline that draws itself in from the left. Applied to the link itself, so
+ * there is no extra span to position or keep in sync.
+ */
+.underline-draw {
+  background-image: linear-gradient(to right, var(--neon), transparent);
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 0% 1px;
+  transition: background-size 0.6s var(--ease-flow);
+  padding-bottom: 2px;
+}
+
+.underline-draw:hover,
+.underline-draw:focus-visible,
+.group:hover .underline-draw {
+  background-size: 100% 1px;
+}
+
+/**
+ * Scroll reveals, driven by `components/reveal.tsx`. The hidden state lives
+ * inside a `no-preference` query on purpose: with motion reduced there is no
+ * hidden state at all, so nothing can get stuck invisible if the observer
+ * never fires.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    transition:
+      opacity 0.85s var(--ease-flow),
+      transform 0.85s var(--ease-flow);
+  }
+
+  .reveal[data-shown="true"] {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/**
+ * The home page's "scroll to climb" cue. A compositor-driven keyframe rather
+ * than a JS animation loop, because it never stops. The reduced-motion block
+ * below halts it along with everything else.
+ */
+@keyframes cue-breathe {
+  0%,
+  100% {
+    transform: scaleX(1);
+  }
+  50% {
+    transform: scaleX(0.4);
+  }
+}
+
+.cue-line {
+  transform-origin: left;
+  animation: cue-breathe 2.8s ease-in-out infinite;
+}
+
+/* Focus must stay obvious over a busy canvas. */
+:focus-visible {
+  outline: 2px solid var(--neon);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
