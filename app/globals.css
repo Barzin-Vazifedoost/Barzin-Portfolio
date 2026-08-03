@@ -391,6 +391,26 @@ a.pill:focus-visible,
   }
 }
 
+/**
+ * The home page's "scroll to climb" cue. A compositor-driven keyframe rather
+ * than a JS animation loop, because it never stops. The reduced-motion block
+ * below halts it along with everything else.
+ */
+@keyframes cue-breathe {
+  0%,
+  100% {
+    transform: scaleX(1);
+  }
+  50% {
+    transform: scaleX(0.4);
+  }
+}
+
+.cue-line {
+  transform-origin: left;
+  animation: cue-breathe 2.8s ease-in-out infinite;
+}
+
 /* Focus must stay obvious over a busy canvas. */
 :focus-visible {
   outline: 2px solid var(--neon);

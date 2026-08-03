@@ -1,23 +1,23 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import {
-  MotionConfig,
-  motion,
-  useInView,
-  useReducedMotion,
-  useScroll,
-  useTransform,
-} from "motion/react";
+import { MotionConfig, motion, useReducedMotion } from "motion/react";
 
+import { observeReveal } from "@/components/reveal";
 import { surgeTree } from "@/lib/tree-events";
 
 /**
- * The home page's client half. It owns layout, the load sequence, and every
- * scroll-linked transform; the server hands it plain serializable props so no
- * animation code ever reaches the content layer.
+ * The home page's client half. It owns layout and the load sequence; the server
+ * hands it plain serializable props so no animation code ever reaches the
+ * content layer.
+ *
+ * Nothing here is driven by scroll position. Motion is used for the one-off
+ * entrance sequence and for hover, both of which run to completion and stop —
+ * so while the page is being scrolled, the canvas has the main thread to
+ * itself. Anything that needs to react to entering the viewport uses an
+ * IntersectionObserver and the shared `.reveal` rule instead.
  *
  * The canvas is loaded with `ssr: false` from inside this client boundary —
  * Next forbids that option in Server Components, which is why the split lives
@@ -36,21 +36,7 @@ const TIMING = {
   heroStagger: 0.09,
   /** Gap between hero blocks (name → tagline → description → cue). */
   blockStagger: 0.14,
-  /** Gap between items inside a section. */
-  itemStagger: 0.08,
   reveal: 0.9,
-} as const;
-
-/** Scroll-linked ranges for content items entering the viewport. */
-const SCROLL = {
-  /** Where an item's own progress starts and finishes. */
-  offset: ["start end", "center center"] as const,
-  /** Pixels travelled upward as an item settles. */
-  rise: 72,
-  /** Degrees of settle rotation. Alternates sign per item. */
-  rotate: 2.6,
-  /** Horizontal drift, alternating direction so the column feels alive. */
-  drift: 26,
 } as const;
 
 export type SceneItem = {
@@ -122,8 +108,16 @@ function Tendril({ index, active }: { index: number; active: boolean }) {
 /** Section label in the mono voice, with a node that lights as it scrolls in. */
 function Eyebrow({ children }: { children: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  // Fires slightly before the label reaches the viewport edge.
-  const inView = useInView(ref, { once: true, margin: "-12% 0px -12% 0px" });
+  const [inView, setInView] = useState(false);
+
+  // Shares the site's reveal observer rather than motion's `useInView`, which
+  // only listens for intersection: jumping the scroll position straight past a
+  // heading left it stuck at opacity 0 for the rest of the session.
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    return observeReveal(element, () => setInView(true));
+  }, []);
 
   return (
     <div ref={ref} className="mb-8 flex items-center gap-3">
@@ -157,22 +151,29 @@ function Eyebrow({ children }: { children: string }) {
 }
 
 /**
- * A content item whose transform is driven by its own scroll progress, so the
- * column settles as you climb rather than popping on a threshold.
+ * A content item that reveals itself once, when it first scrolls into view.
+ *
+ * This used to be driven continuously by its own scroll progress — four motion
+ * values per item, recomputed every scroll frame, on an element pinned to its
+ * own compositor layer by `will-change`. With six items that is 24 values a
+ * frame competing with the canvas for the same main thread, to animate
+ * something each item only does once. An IntersectionObserver and the shared
+ * `.reveal` rule cost nothing while scrolling and land in the same place.
+ *
+ * It also fixes the drift at the source: the old horizontal offset put items
+ * past the right edge of a phone viewport until the page had been scrolled.
  */
 function ItemCard({ item, index }: { item: SceneItem; index: number }) {
   const ref = useRef<HTMLLIElement>(null);
-  const reduced = useReducedMotion();
   const [active, setActive] = useState(false);
 
-  // Spread: `SCROLL` is `as const`, and useScroll wants a mutable offset array.
-  const { scrollYProgress } = useScroll({ target: ref, offset: [...SCROLL.offset] });
-  const direction = index % 2 === 0 ? 1 : -1;
-
-  const y = useTransform(scrollYProgress, [0, 1], [SCROLL.rise, 0]);
-  const x = useTransform(scrollYProgress, [0, 1], [SCROLL.drift * direction, 0]);
-  const rotate = useTransform(scrollYProgress, [0, 1], [SCROLL.rotate * direction, 0]);
-  const opacity = useTransform(scrollYProgress, [0, 0.55], [0, 1]);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    return observeReveal(element, () => {
+      element.dataset.shown = "true";
+    });
+  }, []);
 
   const highlight = (): void => {
     setActive(true);
@@ -180,16 +181,12 @@ function ItemCard({ item, index }: { item: SceneItem; index: number }) {
   };
 
   return (
-    <motion.li
+    <li
       ref={ref}
       data-reveal
-      className="group relative py-7"
-      // willChange promotes the item to its own compositor layer. Without it,
-      // continuously-changing opacity and rotate force the text inside to be
-      // re-rasterised on every scroll frame, which is the expensive part.
-      style={
-        reduced ? undefined : { y, x, rotate, opacity, willChange: "transform, opacity" }
-      }
+      // `.reveal` owns the hidden state, the transition and the reduced-motion
+      // case, so there is one definition of "reveal" across the whole site.
+      className="reveal group relative py-7"
       onMouseEnter={highlight}
       onMouseLeave={() => setActive(false)}
       onFocus={highlight}
@@ -211,7 +208,7 @@ function ItemCard({ item, index }: { item: SceneItem; index: number }) {
 
       {item.meta ? <p className="meta mt-2.5">{item.meta}</p> : null}
       <p className="mt-3 max-w-prose text-[var(--text-dim)]">{item.summary}</p>
-    </motion.li>
+    </li>
   );
 }
 
@@ -237,10 +234,10 @@ export default function HomeScene({
   counts,
   density,
 }: HomeSceneProps) {
-  // Progress through the page is shown by the header's reading bar, which every
-  // page shares — so there is no second indicator here.
-  const reduced = useReducedMotion();
-
+  // Nothing on this page is driven by scroll position any more. Progress
+  // through the document is shown by the header's reading bar, which every page
+  // shares, and items reveal themselves once via IntersectionObserver — so no
+  // JS runs per scroll frame here at all, leaving the canvas the main thread.
   const words = name.split(" ");
 
   return (
@@ -371,11 +368,14 @@ export default function HomeScene({
                 }}
               >
                 <span className="eyebrow text-[var(--text-faint)]">Scroll to climb</span>
-                <motion.span
+                {/* A CSS keyframe, not a motion loop: this runs forever, and as
+                    a motion animation it drove a JS rAF loop for the entire
+                    time the page was open, competing with the canvas. As CSS it
+                    is handed to the compositor and costs the main thread
+                    nothing. The global reduced-motion rule already stops it. */}
+                <span
                   aria-hidden="true"
-                  className="block h-px w-16 origin-left bg-gradient-to-r from-[var(--mid)] to-transparent"
-                  animate={reduced ? undefined : { scaleX: [1, 0.4, 1] }}
-                  transition={{ duration: 2.8, ease: "easeInOut", repeat: Infinity }}
+                  className="cue-line block h-px w-16 bg-gradient-to-r from-[var(--mid)] to-transparent"
                 />
               </motion.div>
             </section>
