@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/**
+ * Ground truth for the whole site. The home page's canvas paints these same
+ * greens, so the palette lives here rather than in either component.
+ */
+:root {
+  --bg: #050805;
+  --bg-raised: #08110a;
+  --deep: #0a3d1a;
+  --mid: #1a7a3a;
+  --neon: #39ff14;
+  --core: #c8ffdb;
+
+  /* Text ramp — quiet by default, accent reserved for labels and links. */
+  --text: #dcf5e4;
+  --text-dim: #8fae99;
+  --text-faint: #5d7566;
+
+  /* Type scale. Fluid, so the hero holds its presence down to mobile. */
+  --step-hero: clamp(3rem, 9vw, 7.5rem);
+  --step-tagline: clamp(1.25rem, 2.2vw, 1.9rem);
+  --step-title: clamp(1.15rem, 1.5vw, 1.5rem);
+  --step-body: clamp(0.95rem, 1vw, 1.05rem);
+  --step-eyebrow: 0.7rem;
+  --step-meta: 0.72rem;
+
+  /* One easing curve for every transition, CSS or JS. */
+  --ease-flow: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-deep: var(--deep);
+  --color-mid: var(--mid);
+  --color-neon: var(--neon);
+  --color-core: var(--core);
+  --color-text: var(--text);
+  --color-text-dim: var(--text-dim);
+  --color-text-faint: var(--text-faint);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-jetbrains-mono);
+  --font-display: var(--font-fraunces);
+}
+
+html {
+  background: var(--bg);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--step-body);
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The mono voice: eyebrows, dates, counts. Wide tracking, always uppercase. */
+.eyebrow {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: var(--step-eyebrow);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--mid);
+}
+
+.meta {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: var(--step-meta);
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.display {
+  font-family: var(--font-fraunces), ui-serif, Georgia, serif;
+  font-optical-sizing: auto;
+  line-height: 0.92;
+  letter-spacing: -0.02em;
+}
+
+/* Focus must stay obvious over a busy canvas. */
+:focus-visible {
+  outline: 2px solid var(--neon);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
