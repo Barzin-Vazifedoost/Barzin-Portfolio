@@ -127,7 +127,21 @@ const TUNING = {
   veilTreeFade: 0.52,
   /** Peak opacity of a single mist blob. */
   veilStrength: 0.62,
-  veilBlobs: 7,
+  veilBlobs: 5,
+  /**
+   * The mist is composited through a buffer at this fraction of the canvas
+   * rather than blob-by-blob onto the full-resolution canvas.
+   *
+   * This is the single most important number in here for scroll performance.
+   * A blob is `veilBlobRadius * 2` of the smaller viewport axis across, so at
+   * 1440x900 and dpr 2 each one covers about 5M device pixels — the whole
+   * screen — and five of them is five screens of alpha blending, every frame,
+   * starting the moment the page is scrolled at all. Drawn into a quarter-scale
+   * buffer and blitted up once, the same picture costs a little over one
+   * screen. Mist is a soft gradient, so there is nothing to lose by rendering
+   * it small.
+   */
+  veilScale: 0.25,
   /** Blob radius as a fraction of the viewport's smaller axis. */
   veilBlobRadius: 0.62,
   veilDriftSpeed: 0.07,
@@ -171,7 +185,7 @@ const TUNING = {
   targetFps: 60,
   /** Reduced cap while the user is actively scrolling: the main thread is
    *  busy with the DOM then, and the tree is not what is being looked at. */
-  scrollFps: 30,
+  scrollFps: 20,
   /** How long after the last scroll event to keep using `scrollFps`. */
   scrollQuietMs: 180,
   /** A frame slower than this counts against the quality budget. */
@@ -344,7 +358,11 @@ export default function GrowthTree({
     // One soft blob, baked once and reused for every mist puff.
     const mistCanvas = document.createElement("canvas");
     const mistCtx = mistCanvas.getContext("2d");
-    if (!sceneCtx || !bloomCtx || !glowCtx || !vignetteCtx || !mistCtx) return;
+    // The mist blobs are composited together here, at a fraction of the canvas
+    // size, and the result is blitted up in one pass.
+    const veilCanvas = document.createElement("canvas");
+    const veilCtx = veilCanvas.getContext("2d");
+    if (!sceneCtx || !bloomCtx || !glowCtx || !vignetteCtx || !mistCtx || !veilCtx) return;
 
     /** Turned off permanently if the device cannot keep up. */
     let bloomOn = typeof sceneCtx.filter === "string";
@@ -650,7 +668,11 @@ export default function GrowthTree({
      * Draws the luminous half of the frame. `clear` is set when rendering into
      * the offscreen bloom buffer; the direct path paints over the backdrop.
      */
-    const drawInto = (target: CanvasRenderingContext2D, clear: boolean): void => {
+    const drawInto = (
+      target: CanvasRenderingContext2D,
+      clear: boolean,
+      lite: boolean,
+    ): void => {
       target.setTransform(dpr, 0, 0, dpr, 0, 0);
       if (clear) target.clearRect(0, 0, width, height);
       target.globalCompositeOperation = "lighter";
@@ -702,9 +724,10 @@ export default function GrowthTree({
         target.lineWidth = bodyWidth;
         target.stroke();
 
-        // The filament. Same path, so it is exactly centred, and skipped once
-        // the body is already thin enough to be its own core.
-        if (bodyWidth > 1.4) {
+        // The filament. Same path, so it is exactly centred; skipped once the
+        // body is thin enough to be its own core, and while scrolling, where a
+        // second full stroke pass buys sharpness nobody can see.
+        if (bodyWidth > 1.4 && !lite) {
           target.strokeStyle = rgba(colors.core, 1);
           target.globalAlpha = (0.5 - 0.24 * depthT) * treeAlpha;
           target.lineWidth = Math.max(TUNING.filamentMinWidth, bodyWidth * TUNING.filamentRatio);
@@ -716,12 +739,16 @@ export default function GrowthTree({
 
       // Bright leading edge of everything still growing. No global translate:
       // each head carries its own branch's parallax so it stays welded on.
-      // The shadow is the fallback glow only — with bloom on, the bloom pass
-      // already supplies it and a shadow underneath just blurs it twice.
+      //
+      // The shadow stands in for bloom, so it keys off whether bloom is applied
+      // to *this* frame rather than whether it is enabled at all — scroll frames
+      // skip the bloom pass, and without this they would lose the glow with it.
+      // Underneath a real bloom pass it would only blur the same pixels twice.
+      const bloomed = bloomOn && !lite;
       target.globalAlpha = treeAlpha;
       target.strokeStyle = rgba(colors.neon, 0.85);
       target.lineWidth = 1.5;
-      target.shadowBlur = bloomOn ? 0 : TUNING.glowBlur * 1.4;
+      target.shadowBlur = bloomed ? 0 : TUNING.glowBlur * 1.4;
       target.shadowColor = rgba(colors.neon, 0.9);
       target.beginPath();
       for (const branch of branches) {
@@ -772,7 +799,7 @@ export default function GrowthTree({
       if (pulses.length > 0) {
         target.globalAlpha = treeAlpha;
         target.fillStyle = rgba(colors.core, 0.95);
-        target.shadowBlur = bloomOn ? 0 : TUNING.glowBlur * 1.5;
+        target.shadowBlur = bloomed ? 0 : TUNING.glowBlur * 1.5;
         target.shadowColor = rgba(colors.neon, 1);
         target.beginPath();
         for (const pulse of pulses) {
@@ -810,7 +837,7 @@ export default function GrowthTree({
       }
 
       // Emission from tips that are actively growing.
-      if (sparks.length > 0) {
+      if (sparks.length > 0 && !lite) {
         target.shadowBlur = 0;
         for (let tier = 0; tier < 3; tier += 1) {
           target.fillStyle = rgba(colors.neon, 0.15 + tier * 0.2);
@@ -838,6 +865,12 @@ export default function GrowthTree({
       const scale = TUNING.bloomScale * bloomQuality;
       bloomCanvas.width = Math.max(1, Math.round(canvas.width * scale));
       bloomCanvas.height = Math.max(1, Math.round(canvas.height * scale));
+    };
+
+    /** Sizes the veil buffer from the canvas. Called on resize. */
+    const sizeVeil = (): void => {
+      veilCanvas.width = Math.max(1, Math.round(canvas.width * TUNING.veilScale));
+      veilCanvas.height = Math.max(1, Math.round(canvas.height * TUNING.veilScale));
     };
 
     /**
@@ -916,15 +949,31 @@ export default function GrowthTree({
     };
 
     /**
-     * Drifting mist that rolls up through the canopy as you scroll. Seven
-     * scaled blits of one cached blob — cheap enough to run alongside
-     * everything else.
+     * Drifting mist that rolls up through the canopy as you scroll.
+     *
+     * The blobs are composited into a quarter-scale buffer and blitted up once.
+     * Blending them straight onto the canvas meant five screen-sized alpha
+     * blends per frame — invisible on a GPU that accelerates it, and the single
+     * biggest cost on the page everywhere else. Since it engages only once
+     * `scrollProgress` leaves zero, it showed up precisely as "the frame rate
+     * collapses when I scroll".
      */
     const drawVeil = (): void => {
       if (scrollProgress <= 0.002) return;
       const radius = Math.min(width, height) * TUNING.veilBlobRadius;
 
-      ctx.globalCompositeOperation = "source-over";
+      // The buffer is scaled so blob positions can stay in CSS pixels.
+      veilCtx.setTransform(
+        dpr * TUNING.veilScale,
+        0,
+        0,
+        dpr * TUNING.veilScale,
+        0,
+        0,
+      );
+      veilCtx.clearRect(0, 0, width, height);
+      veilCtx.globalCompositeOperation = "source-over";
+
       for (let i = 0; i < TUNING.veilBlobs; i += 1) {
         const phase = i * 1.7;
         const x =
@@ -935,14 +984,18 @@ export default function GrowthTree({
           height * (1.15 - 0.85 * scrollProgress) +
           Math.cos(elapsed * TUNING.veilDriftSpeed * 0.8 + phase) * height * 0.05 +
           ((i % 3) - 1) * height * 0.16;
-        ctx.globalAlpha =
+        veilCtx.globalAlpha =
           scrollProgress * TUNING.veilStrength * (0.5 + 0.5 * Math.abs(Math.sin(phase)));
-        ctx.drawImage(mistCanvas, x - radius, y - radius, radius * 2, radius * 2);
+        veilCtx.drawImage(mistCanvas, x - radius, y - radius, radius * 2, radius * 2);
       }
+
+      veilCtx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
+      ctx.drawImage(veilCanvas, 0, 0, width, height);
     };
 
-    const draw = (): void => {
+    const draw = (lite: boolean): void => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
@@ -953,29 +1006,31 @@ export default function GrowthTree({
       const camera = scrollProgress * TUNING.cameraDrift;
       ctx.drawImage(glowCanvas, 0, camera, width, height);
 
-      if (bloomOn) {
+      // Bloom costs three screen-sized passes: the scene blit, the blurred
+      // downscale and the additive composite. While scrolling that is the first
+      // thing to go — the direct path falls back to a shadow glow, which is a
+      // change in the halo nobody notices against a moving page.
+      if (bloomOn && !lite) {
         // Render once into the scene buffer, then composite it twice: straight
         // at 1:1 for the sharp image, then blurred and additive for the halo.
-        drawInto(sceneCtx, true);
+        drawInto(sceneCtx, true, lite);
         ctx.drawImage(sceneCanvas, 0, 0, width, height);
 
         bloomCtx.setTransform(1, 0, 0, 1, 0, 0);
         bloomCtx.clearRect(0, 0, bloomCanvas.width, bloomCanvas.height);
-        bloomCtx.imageSmoothingQuality = "high";
         bloomCtx.filter = `blur(${TUNING.bloomBlur}px)`;
         bloomCtx.drawImage(sceneCanvas, 0, 0, bloomCanvas.width, bloomCanvas.height);
         bloomCtx.filter = "none";
 
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = TUNING.bloomStrength;
-        ctx.imageSmoothingQuality = "high";
         ctx.drawImage(bloomCanvas, 0, 0, width, height);
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = "source-over";
       } else {
         // No bloom: skip the offscreen buffer entirely and draw straight to
         // the visible canvas, which saves a full-resolution blit per frame.
-        drawInto(ctx, false);
+        drawInto(ctx, false, lite);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.globalCompositeOperation = "source-over";
         ctx.globalAlpha = 1;
@@ -1011,13 +1066,13 @@ export default function GrowthTree({
       const started = performance.now();
       step(pending);
       solve(elapsed, true);
-      draw();
+      draw(scrolling);
       pending = 0;
 
       // One-way quality degrade, in two stages: halve the bloom buffer first,
       // and only drop the glow entirely if that still isn't enough. Sharpness
       // is never traded away here — the full-resolution scene pass stays.
-      if (bloomOn) {
+      if (bloomOn && !scrolling) {
         if (performance.now() - started > TUNING.slowFrameMs) {
           slowFrames += 1;
           if (slowFrames > TUNING.slowFrameLimit) {
@@ -1053,7 +1108,7 @@ export default function GrowthTree({
       if (reduceMotion.matches) {
         settle();
         solve(0, false);
-        draw();
+        draw(false);
         return;
       }
       start();
@@ -1072,7 +1127,7 @@ export default function GrowthTree({
       lastScrollAt = performance.now();
       scrollProgress = scrollRange > 0 ? clamp(window.scrollY / scrollRange, 0, 1) : 0;
       // With motion reduced there is no loop, so repaint on demand instead.
-      if (reduceMotion.matches) draw();
+      if (reduceMotion.matches) draw(false);
     };
 
     const resize = (): void => {
@@ -1092,6 +1147,7 @@ export default function GrowthTree({
       sceneCanvas.width = canvas.width;
       sceneCanvas.height = canvas.height;
       sizeBloom();
+      sizeVeil();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       plant();

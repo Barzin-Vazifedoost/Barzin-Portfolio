@@ -61,6 +61,9 @@ export function SiteHeader({ name, nav }: SiteHeaderProps) {
   const segment = useSelectedLayoutSegment();
   const [frosted, setFrosted] = useState(false);
   const progressRef = useRef<HTMLDivElement | null>(null);
+  /** Mirrors `frosted` so the scroll handler can compare without calling into
+   *  React on every single event. */
+  const frostedRef = useRef(false);
 
   useEffect(() => {
     // The scroll range is cached and refreshed from an observer. Reading
@@ -80,11 +83,14 @@ export function SiteHeader({ name, nav }: SiteHeaderProps) {
         bar.style.transform = `scaleX(${progress})`;
       }
 
-      // State only ever changes on a threshold crossing.
-      setFrosted((current) => {
-        const next = window.scrollY > FROST_AT;
-        return next === current ? current : next;
-      });
+      // React is only touched on an actual threshold crossing. Calling
+      // setFrosted on every scroll event and relying on the bail-out still runs
+      // an updater per event, on a listener that fires at frame rate.
+      const next = window.scrollY > FROST_AT;
+      if (next !== frostedRef.current) {
+        frostedRef.current = next;
+        setFrosted(next);
+      }
     };
 
     measure();
