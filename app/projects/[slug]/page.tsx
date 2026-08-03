@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { Mdx } from "@/components/mdx";
-import { PageShell } from "@/components/page-shell";
+import { BackLink, PageShell } from "@/components/page-shell";
 import { getProject, getProjectSlugs } from "@/lib/content/projects";
 import { formatDate, isoDate } from "@/lib/format";
 
@@ -38,9 +37,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 /** One row of the project fact table. */
 function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border-t border-[var(--deep)]/60 py-3">
+    <div className="border-t border-[var(--border)] px-5 py-4 first:border-t-0">
       <dt className="eyebrow text-[var(--text-faint)]">{label}</dt>
-      <dd className="mt-1.5 text-[var(--text-dim)]">{value}</dd>
+      <dd className="mt-2 text-[0.94em] text-[var(--text-dim)]">{value}</dd>
     </div>
   );
 }
@@ -59,31 +58,19 @@ export default async function ProjectPage({ params }: PageProps) {
       lead={frontmatter.summary}
       aside={formatDate(frontmatter.date, { year: "numeric", month: "short" })}
     >
-      <article className="lg:grid lg:grid-cols-[1fr_minmax(0,15rem)] lg:gap-16">
-        <div className="max-w-[68ch] lg:order-1">
+      <article className="lg:grid lg:grid-cols-[1fr_minmax(0,16rem)] lg:gap-16">
+        <div className="prose-flow max-w-[68ch] lg:order-1">
           <Mdx source={body} />
 
-          <footer className="mt-20 border-t border-[var(--deep)]/60 pt-8">
-            <Link
-              href="/projects"
-              className="eyebrow group/link relative inline-block text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
-            >
-              ← All projects
-              <span
-                aria-hidden="true"
-                className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-              />
-            </Link>
-          </footer>
+          <BackLink href="/projects">All projects</BackLink>
         </div>
 
-        {/* Facts rail: sits alongside on desktop, above the body on mobile. */}
-        <aside className="mb-14 lg:order-2 lg:mb-0">
-          <dl>
-            <Fact
-              label="Date"
-              value={formatDate(frontmatter.date)}
-            />
+        {/* Facts rail: sits alongside on desktop, above the body on mobile.
+            Sticky on desktop, so the stack stays readable while the case study
+            scrolls past it. */}
+        <aside className="mb-14 lg:order-2 lg:mb-0 lg:sticky lg:top-[calc(var(--nav-h)+2rem)] lg:self-start">
+          <dl className="surface overflow-hidden">
+            <Fact label="Date" value={formatDate(frontmatter.date)} />
             {frontmatter.role ? <Fact label="Role" value={frontmatter.role} /> : null}
             {frontmatter.company ? (
               <Fact label="Company" value={frontmatter.company} />
@@ -94,27 +81,29 @@ export default async function ProjectPage({ params }: PageProps) {
           </dl>
 
           {frontmatter.links.length > 0 ? (
-            <ul aria-label="Project links" className="mt-8 flex flex-col gap-3">
+            <ul aria-label="Project links" className="mt-7 flex flex-col gap-3.5 px-1">
               {frontmatter.links.map((link) => (
                 <li key={link.href}>
                   <a
                     href={link.href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="eyebrow group/link relative inline-block text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
+                    className="eyebrow underline-draw group/ext inline-flex items-center gap-2 text-[var(--mid)] transition-colors duration-400 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
                   >
-                    {link.label} ↗
+                    {link.label}
                     <span
                       aria-hidden="true"
-                      className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-                    />
+                      className="transition-transform duration-400 ease-[var(--ease-flow)] group-hover/ext:-translate-y-0.5 group-hover/ext:translate-x-0.5"
+                    >
+                      ↗
+                    </span>
                   </a>
                 </li>
               ))}
             </ul>
           ) : null}
 
-          <p className="meta mt-8 text-[var(--text-faint)]">
+          <p className="meta mt-7 px-1 text-[var(--text-faint)]">
             <time dateTime={isoDate(frontmatter.date)}>{isoDate(frontmatter.date)}</time>
           </p>
         </aside>

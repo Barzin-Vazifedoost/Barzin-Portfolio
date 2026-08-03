@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { PageShell } from "@/components/page-shell";
+import { PageShell, SectionHead } from "@/components/page-shell";
+import { Reveal } from "@/components/reveal";
+import { Spotlight } from "@/components/spotlight";
 import { getExperience, getResume, parseResumeMonth } from "@/lib/content/resume";
 import { formatMonthYear } from "@/lib/format";
 import { site } from "@/lib/site";
@@ -16,19 +18,90 @@ function dateRange(start: string, end?: string): string {
   return `${from} — ${to}`;
 }
 
-/** Section heading with the same eyebrow motif used across the site. */
-function SectionHead({ children }: { children: string }) {
+/** A contact or download link in the mono voice. */
+function ContactLink({
+  href,
+  children,
+  emphasis = false,
+  download = false,
+}: {
+  href: string;
+  children: string;
+  /** The primary action — the PDF — reads brighter than the rest. */
+  emphasis?: boolean;
+  download?: boolean;
+}) {
+  const external = href.startsWith("http");
+
   return (
-    <div className="mb-8 flex items-center gap-3">
-      <span
+    <a
+      href={href}
+      {...(download ? { download: true } : {})}
+      {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+      className={`eyebrow underline-draw inline-block transition-colors duration-400 ease-[var(--ease-flow)] hover:text-[var(--neon)] ${
+        emphasis ? "text-[var(--core)]" : "text-[var(--mid)]"
+      }`}
+    >
+      {children}
+    </a>
+  );
+}
+
+/**
+ * A dated entry on the resume spine — one shape for both roles and degrees,
+ * since they carry the same fields in a different order.
+ */
+function TimelineEntry({
+  period,
+  title,
+  affiliation,
+  location,
+  summary,
+  children,
+}: {
+  period?: string;
+  title: string;
+  affiliation: string;
+  location?: string;
+  summary?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <Spotlight className="group rounded-[var(--radius)]">
+      <div className="rounded-[var(--radius)] py-7 pl-8 pr-6 transition-colors duration-500 ease-[var(--ease-flow)] group-hover:bg-[var(--surface)]">
+        <span aria-hidden="true" className="node absolute left-0 top-[38px]" />
+
+        {period ? <p className="meta">{period}</p> : null}
+
+        <h3 className="display mt-2.5 text-[length:var(--step-title)] font-medium">
+          {title}
+          <span className="text-[var(--text-faint)]"> — </span>
+          <span className="text-[var(--core)]">{affiliation}</span>
+        </h3>
+
+        {location ? (
+          <p className="meta mt-2 text-[var(--text-faint)]">{location}</p>
+        ) : null}
+
+        {summary ? (
+          <p className="mt-4 max-w-[62ch] text-[var(--text-dim)]">{summary}</p>
+        ) : null}
+
+        {children}
+      </div>
+    </Spotlight>
+  );
+}
+
+/** The shared spine behind a run of timeline entries. */
+function Spine({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative">
+      <div
         aria-hidden="true"
-        className="block h-1.5 w-1.5 rounded-full bg-[var(--neon)] shadow-[0_0_12px_var(--neon)]"
+        className="absolute bottom-6 left-[3px] top-6 w-px bg-gradient-to-b from-[var(--border-strong)] via-[var(--border)] to-transparent"
       />
-      <h2 className="eyebrow">{children}</h2>
-      <span
-        aria-hidden="true"
-        className="ml-2 block h-px flex-1 bg-gradient-to-r from-[var(--deep)] to-transparent"
-      />
+      {children}
     </div>
   );
 }
@@ -44,46 +117,19 @@ export default function ResumePage() {
       lead={resume.summary}
       aside={resume.location}
     >
-      <div className="mb-16 flex flex-wrap gap-x-6 gap-y-3">
-        <a
-          href={`mailto:${site.email}`}
-          className="eyebrow group/link relative inline-block text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
-        >
-          {site.email}
-          <span
-            aria-hidden="true"
-            className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-          />
-        </a>
+      <Reveal className="mb-14 flex flex-wrap gap-x-7 gap-y-3">
+        <ContactLink href={`mailto:${site.email}`}>{site.email}</ContactLink>
         {site.socials.map((social) => (
-          <a
-            key={social.href}
-            href={social.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="eyebrow group/link relative inline-block text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
-          >
-            {social.label} ↗
-            <span
-              aria-hidden="true"
-              className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-            />
-          </a>
+          <ContactLink key={social.href} href={social.href}>
+            {`${social.label} ↗`}
+          </ContactLink>
         ))}
         {resume.pdfPath ? (
-          <a
-            href={resume.pdfPath}
-            download
-            className="eyebrow group/link relative inline-block text-[var(--core)]"
-          >
+          <ContactLink href={resume.pdfPath} download emphasis>
             Download PDF ↓
-            <span
-              aria-hidden="true"
-              className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-            />
-          </a>
+          </ContactLink>
         ) : null}
-      </div>
+      </Reveal>
 
       <section aria-labelledby="experience" className="mb-20">
         <h2 id="experience" className="sr-only">
@@ -91,58 +137,44 @@ export default function ResumePage() {
         </h2>
         <SectionHead>Experience</SectionHead>
 
-        <ol className="border-l border-[var(--deep)]/60">
-          {experience.map((role) => (
-            <li key={`${role.company}-${role.start}`} className="group relative py-8 pl-8">
-              <span
-                aria-hidden="true"
-                className="absolute left-0 top-[42px] block h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[var(--mid)] transition-all duration-500 ease-[var(--ease-flow)] group-hover:bg-[var(--neon)] group-hover:shadow-[0_0_14px_var(--neon)]"
-              />
+        <Spine>
+          <ol>
+            {experience.map((role, index) => (
+              <Reveal as="li" key={`${role.company}-${role.start}`} delay={index * 0.05}>
+                <TimelineEntry
+                  period={dateRange(role.start, role.end)}
+                  title={role.role}
+                  affiliation={role.company}
+                  location={role.location}
+                  summary={role.summary}
+                >
+                  {role.highlights.length > 0 ? (
+                    <ul className="mt-4 flex flex-col gap-2">
+                      {role.highlights.map((highlight) => (
+                        <li
+                          key={highlight}
+                          className="relative max-w-[62ch] pl-5 text-[var(--text-dim)] before:absolute before:left-0 before:top-[0.7em] before:block before:h-1 before:w-1 before:rounded-full before:bg-[var(--mid)]"
+                        >
+                          {highlight}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
 
-              <p className="meta">{dateRange(role.start, role.end)}</p>
-
-              <h3 className="display mt-2 text-[length:var(--step-title)] font-medium">
-                {role.role}
-                <span className="text-[var(--text-faint)]"> — </span>
-                <span className="text-[var(--core)]">{role.company}</span>
-              </h3>
-
-              {role.location ? (
-                <p className="meta mt-1.5 text-[var(--text-faint)]">{role.location}</p>
-              ) : null}
-
-              {role.summary ? (
-                <p className="mt-4 max-w-[62ch] text-[var(--text-dim)]">{role.summary}</p>
-              ) : null}
-
-              {role.highlights.length > 0 ? (
-                <ul className="mt-4 flex flex-col gap-2">
-                  {role.highlights.map((highlight) => (
-                    <li
-                      key={highlight}
-                      className="relative max-w-[62ch] pl-5 text-[var(--text-dim)] before:absolute before:left-0 before:top-[0.7em] before:block before:h-1 before:w-1 before:rounded-full before:bg-[var(--mid)]"
-                    >
-                      {highlight}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-
-              {role.stack && role.stack.length > 0 ? (
-                <ul className="mt-5 flex flex-wrap gap-2">
-                  {role.stack.map((item) => (
-                    <li
-                      key={item}
-                      className="meta rounded-full border border-[var(--deep)] px-3 py-1 text-[var(--text-faint)]"
-                    >
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </li>
-          ))}
-        </ol>
+                  {role.stack && role.stack.length > 0 ? (
+                    <ul className="mt-5 flex flex-wrap gap-2">
+                      {role.stack.map((item) => (
+                        <li key={item} className="pill">
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </TimelineEntry>
+              </Reveal>
+            ))}
+          </ol>
+        </Spine>
       </section>
 
       <section aria-labelledby="education" className="mb-20">
@@ -151,36 +183,25 @@ export default function ResumePage() {
         </h2>
         <SectionHead>Education</SectionHead>
 
-        <ol className="border-l border-[var(--deep)]/60">
-          {resume.education.map((entry) => (
-            <li
-              key={`${entry.institution}-${entry.credential}`}
-              className="group relative py-8 pl-8"
-            >
-              <span
-                aria-hidden="true"
-                className="absolute left-0 top-[42px] block h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[var(--mid)] transition-all duration-500 ease-[var(--ease-flow)] group-hover:bg-[var(--neon)] group-hover:shadow-[0_0_14px_var(--neon)]"
-              />
-
-              {entry.start ? (
-                <p className="meta">{dateRange(entry.start, entry.end)}</p>
-              ) : null}
-
-              <h3 className="display mt-2 text-[length:var(--step-title)] font-medium">
-                {entry.credential}
-                <span className="text-[var(--text-faint)]"> — </span>
-                <span className="text-[var(--core)]">{entry.institution}</span>
-              </h3>
-
-              {entry.location ? (
-                <p className="meta mt-1.5 text-[var(--text-faint)]">{entry.location}</p>
-              ) : null}
-              {entry.notes ? (
-                <p className="mt-3 max-w-[62ch] text-[var(--text-dim)]">{entry.notes}</p>
-              ) : null}
-            </li>
-          ))}
-        </ol>
+        <Spine>
+          <ol>
+            {resume.education.map((entry, index) => (
+              <Reveal
+                as="li"
+                key={`${entry.institution}-${entry.credential}`}
+                delay={index * 0.05}
+              >
+                <TimelineEntry
+                  period={entry.start ? dateRange(entry.start, entry.end) : undefined}
+                  title={entry.credential}
+                  affiliation={entry.institution}
+                  location={entry.location}
+                  summary={entry.notes}
+                />
+              </Reveal>
+            ))}
+          </ol>
+        </Spine>
       </section>
 
       <section aria-labelledby="skills">
@@ -189,14 +210,18 @@ export default function ResumePage() {
         </h2>
         <SectionHead>Skills</SectionHead>
 
-        <dl className="grid gap-px overflow-hidden rounded-sm bg-[var(--deep)]/60 sm:grid-cols-2">
-          {resume.skills.map((group) => (
-            <div key={group.category} className="bg-[var(--bg)] p-6">
-              <dt className="eyebrow text-[var(--text-faint)]">{group.category}</dt>
-              <dd className="mt-3 text-[var(--text-dim)]">{group.items.join(", ")}</dd>
-            </div>
-          ))}
-        </dl>
+        {/* A hairline grid: one panel treatment, divided by its own gaps, so
+            there is no double border where two cells meet. */}
+        <Reveal>
+          <dl className="surface grid gap-px overflow-hidden bg-[var(--border)] sm:grid-cols-2">
+            {resume.skills.map((group) => (
+              <div key={group.category} className="bg-[var(--bg)] p-6">
+                <dt className="eyebrow text-[var(--text-faint)]">{group.category}</dt>
+                <dd className="mt-3 text-[var(--text-dim)]">{group.items.join(", ")}</dd>
+              </div>
+            ))}
+          </dl>
+        </Reveal>
       </section>
     </PageShell>
   );

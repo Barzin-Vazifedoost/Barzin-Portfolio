@@ -39,6 +39,7 @@ export default async function HomePage() {
       name={site.name}
       tagline={site.tagline}
       description={site.description}
+      email={site.email}
       projects={projects}
       posts={posts}
       counts={{ projects: allProjects.length, posts: allPosts.length }}

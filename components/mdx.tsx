@@ -18,9 +18,9 @@ type HeadingProps = ComponentPropsWithoutRef<"h2">;
 type AnchorProps = ComponentPropsWithoutRef<"a">;
 
 const HEADING_CLASS: Record<"h2" | "h3" | "h4", string> = {
-  h2: "display mt-16 mb-5 text-[length:calc(var(--step-title)*1.25)] font-medium text-[var(--core)] scroll-mt-24",
-  h3: "display mt-12 mb-4 text-[length:var(--step-title)] font-medium scroll-mt-24",
-  h4: "eyebrow mt-10 mb-3 text-[var(--text-dim)] scroll-mt-24",
+  h2: "display relative mt-16 mb-5 text-[length:calc(var(--step-title)*1.25)] font-medium text-[var(--core)] scroll-mt-28 before:absolute before:-left-6 before:top-[0.55em] before:hidden before:h-1.5 before:w-1.5 before:rounded-full before:bg-[var(--neon)] before:shadow-[var(--glow-sm)] lg:before:block",
+  h3: "display mt-12 mb-4 text-[length:var(--step-title)] font-medium scroll-mt-28",
+  h4: "eyebrow mt-10 mb-3 text-[var(--text-dim)] scroll-mt-28",
 };
 
 /**
@@ -76,12 +76,12 @@ export const mdxComponents = {
 
   blockquote: (props: ComponentPropsWithoutRef<"blockquote">) => (
     <blockquote
-      className="my-8 border-l-2 border-[var(--mid)] pl-6 italic text-[var(--text)]"
+      className="my-8 border-l-2 border-[var(--mid)] pl-6 italic text-[var(--text)] [box-shadow:-1px_0_12px_-4px_var(--neon)]"
       {...props}
     />
   ),
 
-  hr: () => <hr className="my-14 border-0 border-t border-[var(--deep)]/60" />,
+  hr: () => <hr className="my-14 h-px border-0 bg-gradient-to-r from-[var(--border-strong)] via-[var(--border)] to-transparent" />,
 
   strong: (props: ComponentPropsWithoutRef<"strong">) => (
     <strong className="font-semibold text-[var(--text)]" {...props} />
@@ -89,7 +89,7 @@ export const mdxComponents = {
 
   code: (props: ComponentPropsWithoutRef<"code">) => (
     <code
-      className="rounded bg-[var(--deep)]/40 px-1.5 py-0.5 font-mono text-[0.86em] text-[var(--core)]"
+      className="rounded-[5px] border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-[0.86em] text-[var(--core)]"
       {...props}
     />
   ),
@@ -98,7 +98,7 @@ export const mdxComponents = {
   // the page, and the inner <code> drops the inline pill styling.
   pre: (props: ComponentPropsWithoutRef<"pre">) => (
     <pre
-      className="my-8 overflow-x-auto rounded-sm border border-[var(--deep)]/70 bg-[#040604] p-5 font-mono text-[0.82rem] leading-relaxed text-[var(--text-dim)] [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-inherit"
+      className="surface my-8 overflow-x-auto p-6 font-mono text-[0.82rem] leading-relaxed text-[var(--text-dim)] [&_code]:border-0 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-inherit"
       {...props}
     />
   ),
@@ -110,22 +110,22 @@ export const mdxComponents = {
   ),
   th: (props: ComponentPropsWithoutRef<"th">) => (
     <th
-      className="eyebrow border-b border-[var(--deep)] px-3 py-2 text-[var(--text-faint)]"
+      className="eyebrow border-b border-[var(--border-strong)] px-3 py-2.5 text-[var(--text-faint)]"
       {...props}
     />
   ),
   td: (props: ComponentPropsWithoutRef<"td">) => (
-    <td className="border-b border-[var(--deep)]/40 px-3 py-2 text-[var(--text-dim)]" {...props} />
+    <td className="border-b border-[var(--border)] px-3 py-2.5 text-[var(--text-dim)]" {...props} />
   ),
 
   img: (props: ComponentPropsWithoutRef<"img">) => (
     // eslint-disable-next-line @next/next/no-img-element
-    <img className="my-8 h-auto max-w-full rounded-sm" alt="" {...props} />
+    <img className="my-8 h-auto max-w-full rounded-[var(--radius)] border border-[var(--border)]" alt="" {...props} />
   ),
 
   a: ({ href = "", children, ...props }: AnchorProps) => {
     const className =
-      "text-[var(--core)] underline decoration-[var(--mid)] underline-offset-[3px] transition-colors duration-300 ease-[var(--ease-flow)] hover:decoration-[var(--neon)] hover:text-[var(--neon)]";
+      "text-[var(--core)] underline decoration-[var(--mid)] decoration-1 underline-offset-[3px] transition-colors duration-400 ease-[var(--ease-flow)] hover:decoration-[var(--neon)] hover:text-[var(--neon)]";
     const isInternal = href.startsWith("/") || href.startsWith("#");
 
     if (isInternal) {

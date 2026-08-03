@@ -29,11 +29,11 @@ export type GrowthTreePalette = {
 };
 
 export const GROWTH_TREE_PALETTE: GrowthTreePalette = {
-  bg: "#050805",
-  deep: "#0a3d1a",
-  mid: "#1a7a3a",
-  neon: "#39ff14",
-  core: "#c8ffdb",
+  bg: "#040806",
+  deep: "#0a3b24",
+  mid: "#2ba46a",
+  neon: "#3ff2a0",
+  core: "#d8fdea",
 };
 
 /**
@@ -57,9 +57,10 @@ const TUNING = {
   /** Root length as a fraction of the smaller viewport axis. */
   rootLengthRatio: 0.19,
   rootWidth: 10,
-  /** Trunk position across the viewport. Left of centre: the text column sits
-   *  to its left, the canopy opens to the right. */
-  rootXRatio: 0.44,
+  /** Trunk position across the viewport. Just right of the text column, which
+   *  ends near 48% — the canopy then opens into the empty half instead of
+   *  growing up through the words. */
+  rootXRatio: 0.54,
   /** Seed sits slightly below the fold so the trunk enters from off-screen. */
   rootYOffset: 40,
   /** Fork half-angle and organic jitter (radians). */
@@ -120,11 +121,12 @@ const TUNING = {
 
   // ── Canopy veil ──────────────────────────────────────────────────────────
   /** As you climb, drifting mist rolls up through the canopy and the tree
-   *  dissolves behind it into a field of spores. All driven by scroll. */
-  /** How far the tree fades out by the bottom of the page. */
-  veilTreeFade: 0.78,
+   *  recedes behind it into a field of spores. All driven by scroll. */
+  /** How far the tree fades out by the bottom of the page. Kept well short of
+   *  1 so the canopy stays legible geometry rather than dissolving to fog. */
+  veilTreeFade: 0.52,
   /** Peak opacity of a single mist blob. */
-  veilStrength: 0.86,
+  veilStrength: 0.62,
   veilBlobs: 7,
   /** Blob radius as a fraction of the viewport's smaller axis. */
   veilBlobRadius: 0.62,
@@ -134,31 +136,48 @@ const TUNING = {
   veilSporeSwell: 0.6,
 
   // ── Render ───────────────────────────────────────────────────────────────
-  /** Bloom buffer scale and blur radius, in buffer pixels. */
-  bloomScale: 0.3,
-  bloomBlur: 8,
-  bloomStrength: 0.9,
-  /** Shadow radius, now used only on the few small bright passes. */
-  glowBlur: 10,
-  vignetteStrength: 0.72,
+  /** Bloom buffer scale and blur radius, in buffer pixels.
+   *
+   *  These three numbers decide whether the tree reads sharp or out of focus. A
+   *  low-resolution buffer with a wide blur, composited back at near-full
+   *  strength, means most of the visible light is a smeared upscale and no
+   *  stroke appears to have an edge. A higher-resolution buffer with a tight
+   *  blur at moderate strength keeps the halo hugging the geometry, which is
+   *  what "glowing" should look like. */
+  bloomScale: 0.5,
+  bloomBlur: 4,
+  bloomStrength: 0.5,
+  /** Shadow radius for the small bright passes. Only applied when bloom is
+   *  off: stacking a shadow underneath the bloom blurs the same pixels twice. */
+  glowBlur: 9,
+  vignetteStrength: 0.58,
   groundGlowRadius: 0.55,
   /** Backdrop gradients are baked once at this scale, then upscaled. The bake
    *  happens on resize only and the per-frame cost is a blit either way, so
    *  this is set for fidelity (low values band visibly) rather than speed. */
-  backdropScale: 0.5,
+  backdropScale: 0.75,
+
+  /** A hard, bright centre line drawn inside each branch, as a fraction of the
+   *  branch's own width. A crisp core inside a soft glow is what makes a
+   *  luminous line read as sharp instead of smeared — without it, the widest
+   *  strokes are all halo and no filament. */
+  filamentRatio: 0.34,
+  filamentMinWidth: 0.75,
 
   // ── Performance ──────────────────────────────────────────────────────────
-  /** Render cap. Ambient motion reads fine well below 60, and this is the
-   *  single biggest saving on a busy page. */
-  targetFps: 30,
+  /** Render cap. Sub-60 judder on a continuously moving canvas reads as motion
+   *  blur, so this is deliberately at refresh rate; the adaptive degrade below
+   *  is what protects slower devices. */
+  targetFps: 60,
   /** Reduced cap while the user is actively scrolling: the main thread is
    *  busy with the DOM then, and the tree is not what is being looked at. */
-  scrollFps: 18,
+  scrollFps: 30,
   /** How long after the last scroll event to keep using `scrollFps`. */
   scrollQuietMs: 180,
   /** A frame slower than this counts against the quality budget. */
-  slowFrameMs: 22,
-  /** Consecutive slow frames before bloom is dropped. One-way. */
+  slowFrameMs: 20,
+  /** Slow frames before quality is stepped down. One-way, two stages: the
+   *  bloom buffer is halved first, and only then dropped entirely. */
   slowFrameLimit: 40,
 
   // ── Budgets ──────────────────────────────────────────────────────────────
@@ -166,10 +185,11 @@ const TUNING = {
   mobileDepthDrop: 2,
   mobileNodeScale: 0.45,
   mobileSporeScale: 0.4,
-  /** Well below retina on purpose: the canvas is a soft, bloomed glow, so
-   *  extra pixels buy almost nothing visible and cost a lot. */
-  maxDpr: 1.25,
-  mobileDpr: 1,
+  /** Full device pixels. Anything below the display's own ratio makes the
+   *  browser upsample every stroke, which is the most visible source of
+   *  softness there is — no amount of bloom tuning recovers from it. */
+  maxDpr: 2,
+  mobileDpr: 1.5,
 } as const;
 
 export type GrowthTreeProps = {
@@ -328,6 +348,9 @@ export default function GrowthTree({
 
     /** Turned off permanently if the device cannot keep up. */
     let bloomOn = typeof sceneCtx.filter === "string";
+    /** Bloom buffer scale multiplier. Halved once under sustained load, which
+     *  is a far less visible concession than dropping the glow altogether. */
+    let bloomQuality = 1;
     let slowFrames = 0;
 
     const densityScale = clamp(density, 0.4, 2);
@@ -644,6 +667,8 @@ export default function GrowthTree({
       const treeAlpha = 1 - scrollProgress * TUNING.veilTreeFade;
 
       // Edges, one batched path per depth: shared width, alpha and parallax.
+      // Each depth is stroked twice from a single path — once wide for the body
+      // and once narrow for the bright filament down its centre.
       for (let depth = 0; depth < byDepth.length; depth += 1) {
         const indices = byDepth[depth];
         if (!indices || indices.length === 0) continue;
@@ -651,16 +676,13 @@ export default function GrowthTree({
         const depthT = depth / Math.max(1, maxDepth);
         // Deeper layers ride further with scroll, which reads as volume.
         const parallax = depthShift(depth);
+        const bodyWidth = Math.max(
+          0.8,
+          TUNING.rootWidth * Math.pow(TUNING.widthFalloff, depth),
+        );
 
         target.save();
         target.translate(0, parallax);
-        target.strokeStyle = trunkGradient ?? rgba(colors.mid, 1);
-        // Atmospheric dimming: distance into the canopy fades out.
-        target.globalAlpha = (0.92 - 0.4 * depthT) * treeAlpha;
-        target.lineWidth = Math.max(
-          0.6,
-          TUNING.rootWidth * Math.pow(TUNING.widthFalloff, depth),
-        );
         target.shadowBlur = 0;
 
         target.beginPath();
@@ -671,16 +693,35 @@ export default function GrowthTree({
           target.moveTo(branch.ax, branch.ay);
           target.quadraticCurveTo(cx, cy, branch.bx, branch.by);
         }
+
+        target.strokeStyle = trunkGradient ?? rgba(colors.mid, 1);
+        // Atmospheric dimming: distance into the canopy fades out. Shallower
+        // than a straight falloff, so far branches stay defined lines rather
+        // than dissolving into grey haze.
+        target.globalAlpha = (0.95 - 0.3 * depthT) * treeAlpha;
+        target.lineWidth = bodyWidth;
         target.stroke();
+
+        // The filament. Same path, so it is exactly centred, and skipped once
+        // the body is already thin enough to be its own core.
+        if (bodyWidth > 1.4) {
+          target.strokeStyle = rgba(colors.core, 1);
+          target.globalAlpha = (0.5 - 0.24 * depthT) * treeAlpha;
+          target.lineWidth = Math.max(TUNING.filamentMinWidth, bodyWidth * TUNING.filamentRatio);
+          target.stroke();
+        }
+
         target.restore();
       }
 
       // Bright leading edge of everything still growing. No global translate:
       // each head carries its own branch's parallax so it stays welded on.
+      // The shadow is the fallback glow only — with bloom on, the bloom pass
+      // already supplies it and a shadow underneath just blurs it twice.
       target.globalAlpha = treeAlpha;
-      target.strokeStyle = rgba(colors.neon, 0.8);
-      target.lineWidth = 1.6;
-      target.shadowBlur = TUNING.glowBlur * 1.4;
+      target.strokeStyle = rgba(colors.neon, 0.85);
+      target.lineWidth = 1.5;
+      target.shadowBlur = bloomOn ? 0 : TUNING.glowBlur * 1.4;
       target.shadowColor = rgba(colors.neon, 0.9);
       target.beginPath();
       for (const branch of branches) {
@@ -715,7 +756,9 @@ export default function GrowthTree({
           const breath = branch.isTip
             ? 1 + Math.sin(elapsed * TUNING.breathSpeed + branch.breathOffset) * TUNING.breathAmount
             : 1;
-          const radius = Math.max(1, branch.width * 0.62) * breath;
+          // Floor above 1px: a sub-pixel additive circle is a grey smudge, not
+          // a dot, which is what made the deepest nodes look like dirt.
+          const radius = Math.max(1.15, branch.width * 0.62) * breath;
           target.moveTo(branch.bx + radius, branch.by);
           target.arc(branch.bx, branch.by, radius, 0, Math.PI * 2);
         }
@@ -729,7 +772,7 @@ export default function GrowthTree({
       if (pulses.length > 0) {
         target.globalAlpha = treeAlpha;
         target.fillStyle = rgba(colors.core, 0.95);
-        target.shadowBlur = TUNING.glowBlur * 1.5;
+        target.shadowBlur = bloomOn ? 0 : TUNING.glowBlur * 1.5;
         target.shadowColor = rgba(colors.neon, 1);
         target.beginPath();
         for (const pulse of pulses) {
@@ -785,6 +828,16 @@ export default function GrowthTree({
 
       target.restore();
       target.shadowBlur = 0;
+    };
+
+    /**
+     * Sizes the bloom buffer from the canvas and the current quality step.
+     * Called on resize and whenever the degrade lowers `bloomQuality`.
+     */
+    const sizeBloom = (): void => {
+      const scale = TUNING.bloomScale * bloomQuality;
+      bloomCanvas.width = Math.max(1, Math.round(canvas.width * scale));
+      bloomCanvas.height = Math.max(1, Math.round(canvas.height * scale));
     };
 
     /**
@@ -845,10 +898,19 @@ export default function GrowthTree({
         mistSize / 2,
         mistSize / 2,
       );
-      // Tinted toward the background so it veils the tree rather than glowing.
-      puff.addColorStop(0, "rgba(6, 16, 9, 0.95)");
-      puff.addColorStop(0.55, "rgba(6, 14, 8, 0.5)");
-      puff.addColorStop(1, "rgba(5, 8, 5, 0)");
+      // Tinted toward the background so it veils the tree rather than glowing,
+      // with a trace of `deep` mixed in so the mist still reads as green.
+      // Derived from the palette rather than hard-coded, so overriding the
+      // colours cannot leave the veil the wrong hue.
+      const mix = 0.22;
+      const mistTint: Rgb = {
+        r: colors.bg.r + (colors.deep.r - colors.bg.r) * mix,
+        g: colors.bg.g + (colors.deep.g - colors.bg.g) * mix,
+        b: colors.bg.b + (colors.deep.b - colors.bg.b) * mix,
+      };
+      puff.addColorStop(0, rgba(mistTint, 0.92));
+      puff.addColorStop(0.55, rgba(mistTint, 0.45));
+      puff.addColorStop(1, rgba(colors.bg, 0));
       mistCtx.fillStyle = puff;
       mistCtx.fillRect(0, 0, mistSize, mistSize);
     };
@@ -892,18 +954,21 @@ export default function GrowthTree({
       ctx.drawImage(glowCanvas, 0, camera, width, height);
 
       if (bloomOn) {
-        // Render once into the scene buffer, then composite it twice.
+        // Render once into the scene buffer, then composite it twice: straight
+        // at 1:1 for the sharp image, then blurred and additive for the halo.
         drawInto(sceneCtx, true);
         ctx.drawImage(sceneCanvas, 0, 0, width, height);
 
         bloomCtx.setTransform(1, 0, 0, 1, 0, 0);
         bloomCtx.clearRect(0, 0, bloomCanvas.width, bloomCanvas.height);
+        bloomCtx.imageSmoothingQuality = "high";
         bloomCtx.filter = `blur(${TUNING.bloomBlur}px)`;
         bloomCtx.drawImage(sceneCanvas, 0, 0, bloomCanvas.width, bloomCanvas.height);
         bloomCtx.filter = "none";
 
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = TUNING.bloomStrength;
+        ctx.imageSmoothingQuality = "high";
         ctx.drawImage(bloomCanvas, 0, 0, width, height);
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = "source-over";
@@ -949,12 +1014,21 @@ export default function GrowthTree({
       draw();
       pending = 0;
 
-      // One-way quality degrade: if the device is consistently missing the
-      // budget, drop bloom rather than keep stuttering.
+      // One-way quality degrade, in two stages: halve the bloom buffer first,
+      // and only drop the glow entirely if that still isn't enough. Sharpness
+      // is never traded away here — the full-resolution scene pass stays.
       if (bloomOn) {
         if (performance.now() - started > TUNING.slowFrameMs) {
           slowFrames += 1;
-          if (slowFrames > TUNING.slowFrameLimit) bloomOn = false;
+          if (slowFrames > TUNING.slowFrameLimit) {
+            if (bloomQuality > 0.5) {
+              bloomQuality = 0.5;
+              sizeBloom();
+              slowFrames = 0;
+            } else {
+              bloomOn = false;
+            }
+          }
         } else if (slowFrames > 0) {
           slowFrames -= 1;
         }
@@ -1017,8 +1091,7 @@ export default function GrowthTree({
       canvas.height = Math.round(height * dpr);
       sceneCanvas.width = canvas.width;
       sceneCanvas.height = canvas.height;
-      bloomCanvas.width = Math.max(1, Math.round(canvas.width * TUNING.bloomScale));
-      bloomCanvas.height = Math.max(1, Math.round(canvas.height * TUNING.bloomScale));
+      sizeBloom();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       plant();

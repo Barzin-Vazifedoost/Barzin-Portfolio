@@ -66,6 +66,8 @@ export type HomeSceneProps = {
   name: string;
   tagline: string;
   description: string;
+  /** Target for the hero's secondary action. */
+  email: string;
   projects: SceneItem[];
   posts: SceneItem[];
   counts: { projects: number; posts: number };
@@ -128,11 +130,10 @@ function Eyebrow({ children }: { children: string }) {
       <motion.span
         aria-hidden="true"
         data-reveal
-        className="block h-1.5 w-1.5 rounded-full bg-[var(--neon)]"
+        className="node node-lit"
         initial={{ scale: 0, opacity: 0 }}
         animate={inView ? { scale: 1, opacity: 1 } : undefined}
         transition={{ duration: 0.6, ease: EASE }}
-        style={{ boxShadow: "0 0 12px var(--neon)" }}
       />
       <motion.span
         className="eyebrow"
@@ -146,7 +147,7 @@ function Eyebrow({ children }: { children: string }) {
       <motion.span
         aria-hidden="true"
         data-reveal
-        className="ml-2 block h-px flex-1 origin-left bg-gradient-to-r from-[var(--deep)] to-transparent"
+        className="ml-2 block h-px flex-1 origin-left bg-gradient-to-r from-[var(--border-strong)] to-transparent"
         initial={{ scaleX: 0 }}
         animate={inView ? { scaleX: 1 } : undefined}
         transition={{ duration: 1.1, ease: EASE, delay: 0.1 }}
@@ -197,25 +198,18 @@ function ItemCard({ item, index }: { item: SceneItem; index: number }) {
       <Tendril index={index} active={active} />
 
       {/* The node where the tendril meets the text. */}
-      <span
-        aria-hidden="true"
-        className="absolute -left-[21px] top-[38px] block h-1.5 w-1.5 rounded-full bg-[var(--mid)] transition-all duration-500 ease-[var(--ease-flow)] group-hover:bg-[var(--neon)] group-hover:shadow-[0_0_14px_var(--neon)]"
-      />
+      <span aria-hidden="true" className="node absolute -left-[25px] top-[38px]" />
 
       <h3 className="display text-[length:var(--step-title)] font-medium">
-        <Link href={item.href} className="relative inline-block text-[var(--text)]">
-          <span className="transition-colors duration-500 ease-[var(--ease-flow)] group-hover:text-[var(--core)]">
-            {item.title}
-          </span>
-          {/* Tendril-underline: draws itself from the left on hover. */}
-          <span
-            aria-hidden="true"
-            className="absolute -bottom-0.5 left-0 h-px w-full origin-left scale-x-0 bg-gradient-to-r from-[var(--neon)] to-transparent transition-transform duration-700 ease-[var(--ease-flow)] group-hover:scale-x-100"
-          />
+        <Link
+          href={item.href}
+          className="underline-draw inline-block text-[var(--text)] transition-colors duration-500 ease-[var(--ease-flow)] group-hover:text-[var(--core)]"
+        >
+          {item.title}
         </Link>
       </h3>
 
-      {item.meta ? <p className="meta mt-2">{item.meta}</p> : null}
+      {item.meta ? <p className="meta mt-2.5">{item.meta}</p> : null}
       <p className="mt-3 max-w-prose text-[var(--text-dim)]">{item.summary}</p>
     </motion.li>
   );
@@ -224,14 +218,11 @@ function ItemCard({ item, index }: { item: SceneItem; index: number }) {
 /** Quiet mono link with the same drawing underline as item titles. */
 function TrailLink({ href, children }: { href: string; children: string }) {
   return (
-    <Link href={href} className="eyebrow group/link relative inline-block text-[var(--mid)]">
-      <span className="transition-colors duration-500 ease-[var(--ease-flow)] group-hover/link:text-[var(--neon)]">
-        {children}
-      </span>
-      <span
-        aria-hidden="true"
-        className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-      />
+    <Link
+      href={href}
+      className="eyebrow underline-draw inline-block text-[var(--mid)] transition-colors duration-400 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
+    >
+      {children}
     </Link>
   );
 }
@@ -240,69 +231,60 @@ export default function HomeScene({
   name,
   tagline,
   description,
+  email,
   projects,
   posts,
   counts,
   density,
 }: HomeSceneProps) {
+  // Progress through the page is shown by the header's reading bar, which every
+  // page shares — so there is no second indicator here.
   const reduced = useReducedMotion();
-  const { scrollYProgress } = useScroll();
-  // The spine fills as you climb — scroll made literal.
-  const spine = useTransform(scrollYProgress, [0, 1], [0, 1]);
 
   const words = name.split(" ");
 
   return (
     <MotionConfig reducedMotion="user" transition={{ duration: TIMING.reveal, ease: EASE }}>
-      {/*
-        Entrance animations render their `initial` state into the prerendered
-        HTML, so without JS every revealed element would stay at opacity 0.
-        This puts the content back for non-JS clients.
-      */}
-      <noscript>
-        <style>{`[data-reveal]{opacity:1 !important;transform:none !important;}`}</style>
-      </noscript>
-
       <GrowthTree density={density} />
 
-      {/* Legibility scrim: keeps branches from fighting the words. */}
+      {/*
+        Legibility scrim: keeps branches from fighting the words. Deliberately
+        much lighter than a flat wash — the canvas is the reason to be on this
+        page, so the scrim only has to hold contrast under the text column and
+        then get out of the way. The stops are the new background colour, so it
+        reads as depth rather than as a grey panel laid on top.
+      */}
       <div
         aria-hidden="true"
-        className="pointer-events-none fixed inset-y-0 left-0 z-[1] w-full lg:w-[62%]"
+        className="pointer-events-none fixed inset-y-0 left-0 z-[1] w-full lg:w-[68%]"
         style={{
           background:
-            "linear-gradient(100deg, rgba(5,8,5,0.94) 0%, rgba(5,8,5,0.88) 38%, rgba(5,8,5,0.55) 66%, rgba(5,8,5,0) 100%)",
+            "linear-gradient(100deg, rgba(4,8,6,0.9) 0%, rgba(4,8,6,0.78) 34%, rgba(4,8,6,0.4) 62%, rgba(4,8,6,0) 100%)",
         }}
       />
 
-      {/* Climb indicator, pinned to the left edge of the column. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed left-6 top-0 z-[2] hidden h-full w-px bg-[var(--deep)]/40 sm:left-10 lg:block"
-      >
-        <motion.div
-          className="h-full w-full origin-top bg-gradient-to-b from-[var(--neon)] via-[var(--mid)] to-transparent"
-          style={reduced ? undefined : { scaleY: spine, willChange: "transform" }}
-        />
-      </div>
-
       <div data-tree-ignore className="relative z-10 px-6 sm:px-10">
-        <div className="lg:grid lg:grid-cols-[minmax(0,46%)_1fr]">
-          <div>
+        <div className="mx-auto max-w-6xl lg:grid lg:grid-cols-[minmax(0,48%)_1fr]">
+          {/* A container, so the hero can size its type against this column's
+              own width rather than the viewport's. */}
+          <div className="@container">
             {/* ── Hero ───────────────────────────────────────────────── */}
-            <section className="flex min-h-[82vh] flex-col justify-center py-16">
+            {/* svh, not vh: on mobile the dynamic toolbar makes vh taller than
+                the visible viewport, which pushes the scroll cue off screen. */}
+            <section className="flex min-h-[calc(100svh-var(--nav-h))] flex-col justify-center py-16">
               <motion.p
-                className="eyebrow mb-8"
+                className="eyebrow mb-8 flex items-center gap-2.5"
                 data-reveal
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: TIMING.heroDelay, ease: EASE }}
               >
+                <span aria-hidden="true" className="node node-lit" />
                 {counts.projects} {counts.projects === 1 ? "project" : "projects"} ·{" "}
                 {counts.posts} {counts.posts === 1 ? "note" : "notes"}
               </motion.p>
 
-              <h1 className="display text-[length:var(--step-hero)]">
+              <h1 className="display display-wash text-[length:var(--step-name)]">
                 {words.map((word, index) => (
                   <motion.span
                     key={word}
@@ -350,15 +332,40 @@ export default function HomeScene({
                 {description}
               </motion.p>
 
+              {/* The page had no controls at all before — every route was
+                  reachable only from the nav or from links buried further down.
+                  Two here: one filled primary, one quiet. */}
               <motion.div
-                className="mt-16 flex items-center gap-3"
+                className="mt-11 flex flex-wrap items-center gap-3"
+                data-reveal
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  delay:
+                    TIMING.heroDelay +
+                    TIMING.blockStagger * 3 +
+                    words.length * TIMING.heroStagger,
+                  ease: EASE,
+                }}
+              >
+                <Link href="/projects" className="btn btn-primary" onMouseEnter={surgeTree}>
+                  View work
+                  <span aria-hidden="true">→</span>
+                </Link>
+                <a href={`mailto:${email}`} className="btn btn-ghost">
+                  Get in touch
+                </a>
+              </motion.div>
+
+              <motion.div
+                className="mt-14 flex items-center gap-3"
                 data-reveal
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{
                   delay:
                     TIMING.heroDelay +
-                    TIMING.blockStagger * 3 +
+                    TIMING.blockStagger * 4 +
                     words.length * TIMING.heroStagger,
                   ease: EASE,
                 }}
@@ -383,7 +390,7 @@ export default function HomeScene({
               {projects.length === 0 ? (
                 <p className="text-[var(--text-dim)]">No featured projects yet.</p>
               ) : (
-                <ul className="border-l border-[var(--deep)]/60 pl-6">
+                <ul className="border-l border-[var(--border)] pl-6">
                   {projects.map((project, index) => (
                     <ItemCard key={project.slug} item={project} index={index} />
                   ))}
@@ -405,7 +412,7 @@ export default function HomeScene({
               {posts.length === 0 ? (
                 <p className="text-[var(--text-dim)]">No posts yet.</p>
               ) : (
-                <ul className="border-l border-[var(--deep)]/60 pl-6">
+                <ul className="border-l border-[var(--border)] pl-6">
                   {posts.map((post, index) => (
                     <ItemCard key={post.slug} item={post} index={index + projects.length} />
                   ))}

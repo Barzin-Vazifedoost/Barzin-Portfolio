@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageShell } from "@/components/page-shell";
+import { Reveal } from "@/components/reveal";
+import { Spotlight } from "@/components/spotlight";
 import { getProjects } from "@/lib/content/projects";
 import { formatDate, isoDate } from "@/lib/format";
 
@@ -23,50 +25,70 @@ export default async function ProjectsPage() {
       {projects.length === 0 ? (
         <p className="text-[var(--text-dim)]">Nothing published yet.</p>
       ) : (
-        <ul className="border-l border-[var(--deep)]/60">
-          {projects.map(({ slug, frontmatter }) => (
-            <li key={slug} className="group relative">
-              <Link
-                href={`/projects/${slug}`}
-                className="block py-8 pl-8 transition-colors duration-500 ease-[var(--ease-flow)] hover:bg-[var(--mid)]/[0.04]"
-              >
-                {/* Node on the spine. */}
-                <span
-                  aria-hidden="true"
-                  className="absolute left-0 top-[42px] block h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[var(--mid)] transition-all duration-500 ease-[var(--ease-flow)] group-hover:bg-[var(--neon)] group-hover:shadow-[0_0_14px_var(--neon)]"
-                />
+        /* Work gets cards rather than a timeline: a project is a thing with
+           presence, and two columns let the stack and summary breathe. The
+           writing index stays a chronological spine, which is the distinction
+           between the two pages. */
+        <ul className="grid gap-5 md:grid-cols-2">
+          {projects.map(({ slug, frontmatter }, index) => (
+            <Reveal as="li" key={slug} delay={index * 0.06} className="flex">
+              <Spotlight className="group surface w-full">
+                <Link
+                  href={`/projects/${slug}`}
+                  className="flex h-full flex-col p-6 sm:p-7"
+                >
+                  <div className="flex items-center gap-3">
+                    <span aria-hidden="true" className="node" />
+                    <time className="meta" dateTime={isoDate(frontmatter.date)}>
+                      {formatDate(frontmatter.date, { year: "numeric", month: "short" })}
+                    </time>
+                    {frontmatter.featured ? (
+                      <span className="eyebrow ml-auto text-[var(--mid)]">Featured</span>
+                    ) : null}
+                  </div>
 
-                <div className="flex flex-wrap items-baseline gap-x-4">
-                  <h2 className="display text-[length:var(--step-title)] font-medium transition-colors duration-500 ease-[var(--ease-flow)] group-hover:text-[var(--core)]">
+                  <h2 className="display mt-5 text-[length:calc(var(--step-title)*1.08)] font-medium transition-colors duration-500 ease-[var(--ease-flow)] group-hover:text-[var(--core)]">
                     {frontmatter.title}
                   </h2>
-                  <time className="meta" dateTime={isoDate(frontmatter.date)}>
-                    {formatDate(frontmatter.date, { year: "numeric", month: "short" })}
-                  </time>
-                </div>
 
-                {frontmatter.role ? (
-                  <p className="meta mt-2">{frontmatter.role}</p>
-                ) : null}
+                  {frontmatter.role ? (
+                    <p className="meta mt-2.5">
+                      {frontmatter.role}
+                      {frontmatter.company ? (
+                        <>
+                          <span className="mx-2 text-[var(--deep)]">/</span>
+                          {frontmatter.company}
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
 
-                <p className="mt-3 max-w-[60ch] text-[var(--text-dim)]">
-                  {frontmatter.summary}
-                </p>
+                  <p className="mt-4 text-[var(--text-dim)]">{frontmatter.summary}</p>
 
-                {frontmatter.stack.length > 0 ? (
-                  <ul aria-label="Stack" className="mt-4 flex flex-wrap gap-2">
-                    {frontmatter.stack.map((item) => (
-                      <li
-                        key={item}
-                        className="meta rounded-full border border-[var(--deep)] px-3 py-1 text-[var(--text-faint)] transition-colors duration-500 ease-[var(--ease-flow)] group-hover:border-[var(--mid)]/60"
-                      >
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </Link>
-            </li>
+                  {frontmatter.stack.length > 0 ? (
+                    <ul aria-label="Stack" className="mt-6 flex flex-wrap gap-2">
+                      {frontmatter.stack.map((item) => (
+                        <li key={item} className="pill">
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+
+                  {/* Pushed to the bottom edge so every card's call to action
+                      lines up regardless of how long the summary runs. */}
+                  <span className="eyebrow mt-auto flex items-center gap-2 pt-7 text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] group-hover:text-[var(--neon)]">
+                    Read case study
+                    <span
+                      aria-hidden="true"
+                      className="transition-transform duration-500 ease-[var(--ease-flow)] group-hover:translate-x-1"
+                    >
+                      →
+                    </span>
+                  </span>
+                </Link>
+              </Spotlight>
+            </Reveal>
           ))}
         </ul>
       )}
