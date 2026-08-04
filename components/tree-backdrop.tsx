@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 
 import type { GrowthTreePalette } from "@/components/growth-tree";
+import { illuminateTree } from "@/lib/tree-events";
 import type { GraftEntry } from "@/lib/tree/graft";
 import { readRoute, type TreeSection } from "@/lib/tree/route";
 
@@ -81,9 +82,51 @@ function Scrim({ section }: { section: TreeSection }) {
   );
 }
 
+/**
+ * One delegated listener rather than a prop on every link. Any anchor pointing
+ * at an entry — in a list, in prose, in the nav — lights its own path through
+ * the canopy, and nothing has to be wired up to opt in.
+ *
+ * Bound to `pointerover`/`focusin` so it answers to the keyboard as well as the
+ * mouse: tabbing through a list of posts walks the light through the tree.
+ */
+function useLinkIllumination(): void {
+  useEffect(() => {
+    const slugFor = (target: EventTarget | null): string | null => {
+      if (!(target instanceof Element)) return null;
+      const anchor = target.closest("a");
+      const href = anchor?.getAttribute("href");
+      // Same-document paths only. Anything absolute or external is not ours.
+      if (!href || !href.startsWith("/")) return null;
+      return readRoute(href).slug;
+    };
+
+    const enter = (event: Event): void => {
+      const slug = slugFor(event.target);
+      if (slug) illuminateTree(slug);
+    };
+    const leave = (event: Event): void => {
+      if (slugFor(event.target)) illuminateTree(null);
+    };
+
+    document.addEventListener("pointerover", enter);
+    document.addEventListener("pointerout", leave);
+    document.addEventListener("focusin", enter);
+    document.addEventListener("focusout", leave);
+    return () => {
+      document.removeEventListener("pointerover", enter);
+      document.removeEventListener("pointerout", leave);
+      document.removeEventListener("focusin", enter);
+      document.removeEventListener("focusout", leave);
+      illuminateTree(null);
+    };
+  }, []);
+}
+
 export default function TreeBackdrop({ seed, density, entries }: TreeBackdropProps) {
   const pathname = usePathname();
   const { section, slug } = useMemo(() => readRoute(pathname), [pathname]);
+  useLinkIllumination();
 
   return (
     <>

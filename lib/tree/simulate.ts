@@ -104,18 +104,27 @@ export type Simulation = {
  * branch must derive its position from this, or it drifts off the rendered
  * path — the chord between the endpoints is not the shape being drawn.
  */
-export function branchControl(branch: SimBranch): { cx: number; cy: number } {
+export function branchControl(branch: SimBranch, curveScale = 1): { cx: number; cy: number } {
   const dx = branch.bx - branch.ax;
   const dy = branch.by - branch.ay;
+  const curve = branch.curve * curveScale;
   return {
-    cx: (branch.ax + branch.bx) / 2 - dy * branch.curve,
-    cy: (branch.ay + branch.by) / 2 + dx * branch.curve,
+    cx: (branch.ax + branch.bx) / 2 - dy * curve,
+    cy: (branch.ay + branch.by) / 2 + dx * curve,
   };
 }
 
-/** Point at `t` (0–1) along the branch's rendered curve. */
-export function pointOnBranch(branch: SimBranch, t: number): { x: number; y: number } {
-  const { cx, cy } = branchControl(branch);
+/**
+ * Point at `t` (0–1) along the branch's rendered curve. `curveScale` must match
+ * whatever the stroke was drawn with, or anything riding the branch drifts off
+ * it — which is the entire reason this shares `branchControl`.
+ */
+export function pointOnBranch(
+  branch: SimBranch,
+  t: number,
+  curveScale = 1,
+): { x: number; y: number } {
+  const { cx, cy } = branchControl(branch, curveScale);
   const inv = 1 - t;
   const a = inv * inv;
   const b = 2 * inv * t;

@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useRef } from "react";
 
-import { TREE_SURGE_EVENT } from "@/lib/tree-events";
+import {
+  TREE_ILLUMINATE_EVENT,
+  TREE_SURGE_EVENT,
+  type IlluminateDetail,
+} from "@/lib/tree-events";
 import { MOBILE_BREAKPOINT, STRUCTURE, buildTree, type TreeTopology } from "@/lib/tree/build";
 import { graftContent, type Graft, type GraftEntry } from "@/lib/tree/graft";
 import {
@@ -12,6 +16,7 @@ import {
   pointOnBranch,
   type Simulation,
 } from "@/lib/tree/simulate";
+import { createSeparation, solveSeparation, type Separation } from "@/lib/tree/split";
 import { clamp, easeOut } from "@/lib/tree/math";
 
 /**
@@ -78,17 +83,25 @@ const RENDER = {
   panLimit: 0.22,
   /** Exponential approach rate. Higher settles faster. */
   cameraEase: 2.6,
-  /** Radius of a node carrying content, and of the focused one. */
+  /** Radius of a node carrying content, of a hovered one, and of the focused one. */
   anchorRadius: 3.2,
+  litRadius: 4.3,
   focusRadius: 5.4,
+
+  // ── Separation ───────────────────────────────────────────────────────────
+  /** How much of each branch's bend is straightened out at full separation.
+   *  A tree bends; a diagram does not. */
+  splitStraighten: 0.85,
 
   // ── Canopy veil ──────────────────────────────────────────────────────────
   /** As you climb, drifting mist rolls up through the canopy and the tree
    *  dissolves behind it into a field of spores. All driven by scroll. */
-  /** How far the tree fades out by the bottom of the page. */
-  veilTreeFade: 0.78,
+  /** How far the tree fades out by the bottom of the page. Lower than it was:
+   *  the tree now comes apart as you scroll, and dissolving it to near nothing
+   *  meant you never got to see that happen. */
+  veilTreeFade: 0.42,
   /** Peak opacity of a single mist blob. */
-  veilStrength: 0.86,
+  veilStrength: 0.62,
   veilBlobs: 7,
   /** Blob radius as a fraction of the viewport's smaller axis. */
   veilBlobRadius: 0.62,
@@ -285,6 +298,18 @@ export default function GrowthTree({
     let panTargetY = 0;
 
     /**
+     * Slug being hovered anywhere on the page. It lights a path but never moves
+     * the camera — a canopy that lurched every time the pointer crossed a link
+     * would be unusable.
+     */
+    let hoverSlug: string | null = null;
+    let litIndex = -1;
+
+    // Scroll-driven separation. Rewritten in place, only when scroll moved.
+    let separation: Separation = createSeparation(0);
+    let separationScroll = Number.NaN;
+
+    /**
      * Height-based colour ramp: emerald at the roots, mint at the tips. Applied
      * as a gradient on the stroke so it survives per-depth batching.
      */
@@ -308,8 +333,18 @@ export default function GrowthTree({
       topology = buildTree({ width, height, seed, density });
       sim = createSimulation(topology, { speed, seed });
       graft = graftContent(topology, entriesRef.current);
-      // A replant invalidates the resolved focus — indices are per-topology.
+      separation = createSeparation(topology.branches.length);
+      separationScroll = Number.NaN;
+      // A replant invalidates the resolved indices — they are per-topology.
       focusIndex = -1;
+      litIndex = -1;
+    };
+
+    /** Recomputes separation, but only when the scroll actually moved. */
+    const syncSeparation = (): void => {
+      if (!topology || separationScroll === scrollProgress) return;
+      solveSeparation(topology, scrollProgress, separation);
+      separationScroll = scrollProgress;
     };
 
     /**
@@ -335,13 +370,22 @@ export default function GrowthTree({
       );
     };
 
-    /** Resolves the focused slug against the current topology, once per frame. */
+    const resolve = (slug: string | null): number =>
+      slug && graft ? (graft.bySlug.get(slug) ?? -1) : -1;
+
+    /**
+     * Resolves what the canopy should be pointing at, once per frame. The route
+     * drives the camera; a hovered link only takes over the lit path, so
+     * pointing at a link previews where it goes without moving the scene.
+     */
     const readFocus = (): void => {
-      const slug = focusRef.current;
-      const next = slug && graft ? (graft.bySlug.get(slug) ?? -1) : -1;
-      if (next === focusIndex) return;
-      focusIndex = next;
-      retarget();
+      const next = resolve(focusRef.current);
+      if (next !== focusIndex) {
+        focusIndex = next;
+        retarget();
+      }
+      const hovered = resolve(hoverSlug);
+      litIndex = hovered !== -1 ? hovered : focusIndex;
     };
 
     /**
@@ -364,25 +408,36 @@ export default function GrowthTree({
       target.lineJoin = "round";
 
       const camera = scrollProgress * RENDER.cameraDrift;
-      /** Vertical offset for a given depth. Everything anchored to a branch
-       *  must use this so it scrolls with the branch, not against it. */
-      const depthShift = (depth: number): number =>
-        camera + scrollProgress * RENDER.parallaxDepth * (depth / Math.max(1, maxDepth));
       /** The tree recedes as the veil rolls in. Applied to branch-anchored
        *  passes only — the spores deliberately survive to carry the scene. */
       const treeAlpha = 1 - scrollProgress * RENDER.veilTreeFade;
 
-      // Edges, one batched path per depth: shared width, alpha and parallax.
+      /**
+       * Every branch's total displacement: its parallax by depth, plus the
+       * scroll separation that pulls the tree apart at the joints. Each branch
+       * moves rigidly by its own vector, which is exactly why the joints open —
+       * the gap at a joint is the difference between a child's offset and its
+       * parent's. No global translate anywhere below: siblings at one depth no
+       * longer share an offset once the tree starts coming apart.
+       */
+      const offX = (branch: (typeof branches)[number]): number => separation.x[branch.index];
+      const offY = (branch: (typeof branches)[number]): number =>
+        separation.y[branch.index] +
+        camera +
+        scrollProgress * RENDER.parallaxDepth * (branch.depth / Math.max(1, maxDepth));
+
+      // A tree bends; a diagram does not. The bend relaxes out as it separates.
+      const curveScale = 1 - separation.progress * RENDER.splitStraighten;
+
+      // Edges, still one batched path per depth — the offsets are baked into
+      // the coordinates rather than applied as a transform, so the batching
+      // survives separation.
       for (let depth = 0; depth < byDepth.length; depth += 1) {
         const indices = byDepth[depth];
         if (!indices || indices.length === 0) continue;
 
         const depthT = depth / Math.max(1, maxDepth);
-        // Deeper layers ride further with scroll, which reads as volume.
-        const parallax = depthShift(depth);
 
-        target.save();
-        target.translate(0, parallax);
         target.strokeStyle = trunkGradient ?? rgba(paint.mid, 1);
         // Atmospheric dimming: distance into the canopy fades out.
         target.globalAlpha = (0.92 - 0.4 * depthT) * treeAlpha;
@@ -396,31 +451,33 @@ export default function GrowthTree({
         for (const index of indices) {
           const branch = branches[index];
           if (!branch.active || branch.progress <= 0) continue;
-          const { cx, cy } = branchControl(branch);
-          target.moveTo(branch.ax, branch.ay);
-          target.quadraticCurveTo(cx, cy, branch.bx, branch.by);
+          const ox = offX(branch);
+          const oy = offY(branch);
+          const { cx, cy } = branchControl(branch, curveScale);
+          target.moveTo(branch.ax + ox, branch.ay + oy);
+          target.quadraticCurveTo(cx + ox, cy + oy, branch.bx + ox, branch.by + oy);
         }
         target.stroke();
-        target.restore();
       }
 
-      // The route made visible: the path from the root to whatever you are
-      // reading. Each branch carries its own parallax, so no global translate —
-      // and each has its own width, so they cannot share one path.
-      if (focusIndex !== -1) {
+      // The path from the root to whatever you are reading — or to the link
+      // under the pointer. Each branch has its own width, so they cannot share
+      // one path.
+      if (litIndex !== -1) {
         target.globalAlpha = treeAlpha;
         target.strokeStyle = rgba(paint.neon, 0.9);
         target.shadowBlur = RENDER.glowBlur * 1.6;
         target.shadowColor = rgba(paint.neon, 1);
-        for (let i = focusIndex; i !== -1; i = branches[i].parent) {
+        for (let i = litIndex; i !== -1; i = branches[i].parent) {
           const branch = branches[i];
           if (!branch.active || branch.progress <= 0) continue;
-          const shift = depthShift(branch.depth);
-          const { cx, cy } = branchControl(branch);
+          const ox = offX(branch);
+          const oy = offY(branch);
+          const { cx, cy } = branchControl(branch, curveScale);
           target.lineWidth = Math.max(1.2, branch.width * 0.85);
           target.beginPath();
-          target.moveTo(branch.ax, branch.ay + shift);
-          target.quadraticCurveTo(cx, cy + shift, branch.bx, branch.by + shift);
+          target.moveTo(branch.ax + ox, branch.ay + oy);
+          target.quadraticCurveTo(cx + ox, cy + oy, branch.bx + ox, branch.by + oy);
           target.stroke();
         }
         target.shadowBlur = 0;
@@ -438,10 +495,11 @@ export default function GrowthTree({
         if (!branch.active || branch.progress <= 0 || branch.progress >= 1) continue;
         const eased = easeOut(branch.progress);
         const back = Math.max(0, eased - 0.14) / Math.max(0.0001, eased);
-        const shift = depthShift(branch.depth);
-        const from = pointOnBranch(branch, back);
-        target.moveTo(from.x, from.y + shift);
-        target.lineTo(branch.bx, branch.by + shift);
+        const ox = offX(branch);
+        const oy = offY(branch);
+        const from = pointOnBranch(branch, back, curveScale);
+        target.moveTo(from.x + ox, from.y + oy);
+        target.lineTo(branch.bx + ox, branch.by + oy);
       }
       target.stroke();
 
@@ -451,10 +509,7 @@ export default function GrowthTree({
         if (!indices || indices.length === 0) continue;
 
         const depthT = depth / Math.max(1, maxDepth);
-        const parallax = depthShift(depth);
 
-        target.save();
-        target.translate(0, parallax);
         target.fillStyle = rgba(paint.core, 1);
         target.globalAlpha = (0.95 - 0.45 * depthT) * treeAlpha;
         target.shadowBlur = 0;
@@ -469,11 +524,12 @@ export default function GrowthTree({
                 MOTION.breathAmount
             : 1;
           const radius = Math.max(1, branch.width * 0.62) * breath;
-          target.moveTo(branch.bx + radius, branch.by);
-          target.arc(branch.bx, branch.by, radius, 0, Math.PI * 2);
+          const x = branch.bx + offX(branch);
+          const y = branch.by + offY(branch);
+          target.moveTo(x + radius, y);
+          target.arc(x, y, radius, 0, Math.PI * 2);
         }
         target.fill();
-        target.restore();
       }
 
       // Branches that are actually something you published, drawn heavier than
@@ -488,14 +544,20 @@ export default function GrowthTree({
         for (const index of graft.anchors) {
           const branch = branches[index];
           if (!branch || !branch.active || branch.progress < 0.98) continue;
-          const shift = depthShift(branch.depth);
           const breath =
             1 +
             Math.sin(elapsed * MOTION.breathSpeed + branch.breathOffset) * MOTION.breathAmount;
-          const radius =
-            (index === focusIndex ? RENDER.focusRadius : RENDER.anchorRadius) * breath;
-          target.moveTo(branch.bx + radius, branch.by + shift);
-          target.arc(branch.bx, branch.by + shift, radius, 0, Math.PI * 2);
+          const base =
+            index === focusIndex
+              ? RENDER.focusRadius
+              : index === litIndex
+                ? RENDER.litRadius
+                : RENDER.anchorRadius;
+          const radius = base * breath;
+          const x = branch.bx + offX(branch);
+          const y = branch.by + offY(branch);
+          target.moveTo(x + radius, y);
+          target.arc(x, y, radius, 0, Math.PI * 2);
         }
         target.fill();
         target.shadowBlur = 0;
@@ -513,11 +575,12 @@ export default function GrowthTree({
         for (const pulse of pulses) {
           const branch = branches[pulse.branch];
           if (!branch) continue;
-          const point = pointOnBranch(branch, Math.min(1, pulse.t));
-          const y = point.y + depthShift(branch.depth);
+          const point = pointOnBranch(branch, Math.min(1, pulse.t), curveScale);
+          const x = point.x + offX(branch);
+          const y = point.y + offY(branch);
           const radius = 2.2 * pulse.bright;
-          target.moveTo(point.x + radius, y);
-          target.arc(point.x, y, radius, 0, Math.PI * 2);
+          target.moveTo(x + radius, y);
+          target.arc(x, y, radius, 0, Math.PI * 2);
         }
         target.fill();
       }
@@ -672,6 +735,9 @@ export default function GrowthTree({
 
     const draw = (): void => {
       const paint = colorsRef.current;
+      // Every path below reads separation, so it is refreshed here rather than
+      // in the loop — the reduced-motion path repaints without a loop at all.
+      syncSeparation();
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalCompositeOperation = "source-over";
@@ -838,6 +904,23 @@ export default function GrowthTree({
     };
 
     /**
+     * Any internal link, anywhere, previewing where it goes. Lights the path
+     * only — the camera stays where the route put it, because a scene that
+     * lurched whenever the pointer crossed a link would be unusable.
+     */
+    const onIlluminate = (event: Event): void => {
+      const detail = (event as CustomEvent<IlluminateDetail>).detail;
+      const next = detail?.slug ?? null;
+      if (next === hoverSlug) return;
+      hoverSlug = next;
+      // No loop under reduced motion, so repaint on demand.
+      if (reduceMotion.matches) {
+        readFocus();
+        draw();
+      }
+    };
+
+    /**
      * A click shakes the canopy. It used to replant the tree from a fresh
      * random seed — but a deterministic shape is the point of the content-
      * derived tree, so the interaction became a gust instead: same tree,
@@ -911,6 +994,7 @@ export default function GrowthTree({
     window.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("scroll", readScroll, { passive: true });
     window.addEventListener(TREE_SURGE_EVENT, onSurge);
+    window.addEventListener(TREE_ILLUMINATE_EVENT, onIlluminate);
     document.addEventListener("visibilitychange", onVisibility);
     reduceMotion.addEventListener("change", onMotionChange);
 
@@ -926,6 +1010,7 @@ export default function GrowthTree({
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("scroll", readScroll);
       window.removeEventListener(TREE_SURGE_EVENT, onSurge);
+      window.removeEventListener(TREE_ILLUMINATE_EVENT, onIlluminate);
       document.removeEventListener("visibilitychange", onVisibility);
       reduceMotion.removeEventListener("change", onMotionChange);
     };

@@ -16,6 +16,13 @@ import { clamp, createRng } from "./math";
 export const MOBILE_BREAKPOINT = 640;
 
 /**
+ * The tree's geometry depends on the viewport, so anything reasoning about the
+ * structure away from a canvas — a server-rendered map of it, a social card —
+ * builds against this instead. It is the desktop tree: the canonical one.
+ */
+export const CANONICAL_VIEWPORT = { width: 1440, height: 900 } as const;
+
+/**
  * Everything that decides what the plant *is*. These are the values that make
  * it read botanical rather than mechanical, and they were tuned by eye — change
  * them one at a time.
@@ -103,6 +110,14 @@ export type TreeBranch = {
   /** Where this branch's tip sits when fully grown and still. */
   restX: number;
   restY: number;
+  /**
+   * Which half of the tree this branch belongs to: -1 left, 1 right, 0 for the
+   * root itself. Inherited from the limb it descends from, *not* read off its
+   * own angle — a twig in the right subtree that happens to point left is still
+   * part of the right subtree. Everything that means "writing versus work"
+   * hangs off this, so the whole limb moves and reads as one thing.
+   */
+  side: -1 | 0 | 1;
 };
 
 export type TreeSpec = {
@@ -181,6 +196,7 @@ export function buildTree({ width, height, seed, density = 1 }: TreeSpec): TreeT
       // Filled by the forward pass below, once every parent is known.
       restX: 0,
       restY: 0,
+      side: 0,
     });
     return index;
   };
@@ -260,6 +276,11 @@ export function buildTree({ width, height, seed, density = 1 }: TreeSpec): TreeT
     const ay = branch.parent === -1 ? rootY : branches[branch.parent].restY;
     branch.restX = ax + Math.cos(branch.restAngle) * branch.length;
     branch.restY = ay + Math.sin(branch.restAngle) * branch.length;
+
+    // Side is decided once, at the first fork off the trunk, then inherited.
+    if (branch.parent === -1) branch.side = 0;
+    else if (branches[branch.parent].side !== 0) branch.side = branches[branch.parent].side;
+    else branch.side = branch.restAngle < rootAngle ? -1 : 1;
 
     byDepth[branch.depth].push(branch.index);
     byId.set(branch.id, branch.index);

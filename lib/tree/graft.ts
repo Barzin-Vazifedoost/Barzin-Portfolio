@@ -105,15 +105,17 @@ export function graftContent(
     return { bySlug, byBranch, anchors };
   }
 
-  const rootAngle = topology.branches[0].restAngle;
   const order = byProminence(topology);
 
   const candidates = topology.branches
     .filter((branch) => branch.depth >= MIN_ANCHOR_DEPTH)
     .map((branch) => branch.index);
 
-  const left = candidates.filter((i) => topology.branches[i].restAngle < rootAngle).sort(order);
-  const right = candidates.filter((i) => topology.branches[i].restAngle >= rootAngle).sort(order);
+  // Side is subtree membership, decided at the first fork off the trunk — not
+  // a branch's own angle. Otherwise a twig that happens to lean the wrong way
+  // puts a post in among the projects, and every reading order interleaves.
+  const left = candidates.filter((i) => topology.branches[i].side === -1).sort(order);
+  const right = candidates.filter((i) => topology.branches[i].side === 1).sort(order);
 
   // Newest first, so the most recent work gets the branch that reaches highest.
   // Slug breaks ties, so two entries sharing a date cannot swap places between

@@ -36,6 +36,7 @@ export const site = {
   nav: [
     { href: "/projects", label: "Projects" },
     { href: "/blog", label: "Writing" },
+    { href: "/tree", label: "Tree" },
     { href: "/resume", label: "Resume" },
   ] satisfies NavItem[],
 };
