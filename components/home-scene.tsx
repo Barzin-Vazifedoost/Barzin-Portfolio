@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState } from "react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   MotionConfig,
@@ -19,11 +18,10 @@ import { surgeTree } from "@/lib/tree-events";
  * scroll-linked transform; the server hands it plain serializable props so no
  * animation code ever reaches the content layer.
  *
- * The canvas is loaded with `ssr: false` from inside this client boundary —
- * Next forbids that option in Server Components, which is why the split lives
- * here rather than in `app/page.tsx`.
+ * The canvas is no longer mounted here. It lives in the root layout so it
+ * survives navigation — see `components/tree-backdrop.tsx`. What remains is the
+ * page's own content and the filaments that reach out toward it.
  */
-const GrowthTree = dynamic(() => import("@/components/growth-tree"), { ssr: false });
 
 /** One easing curve for the entire page, so motion reads as flow. */
 const EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -69,14 +67,6 @@ export type HomeSceneProps = {
   projects: SceneItem[];
   posts: SceneItem[];
   counts: { projects: number; posts: number };
-  /** Canopy density, derived server-side from how much is published. */
-  density: number;
-  /**
-   * Decides the tree's shape. Hashed server-side from the published slugs, so
-   * the canopy is a function of the work: stable across visits and reloads,
-   * and reshaped only by publishing something.
-   */
-  seed: number;
 };
 
 /**
@@ -249,8 +239,6 @@ export default function HomeScene({
   projects,
   posts,
   counts,
-  density,
-  seed,
 }: HomeSceneProps) {
   const reduced = useReducedMotion();
   const { scrollYProgress } = useScroll();
@@ -269,18 +257,6 @@ export default function HomeScene({
       <noscript>
         <style>{`[data-reveal]{opacity:1 !important;transform:none !important;}`}</style>
       </noscript>
-
-      <GrowthTree density={density} seed={seed} />
-
-      {/* Legibility scrim: keeps branches from fighting the words. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed inset-y-0 left-0 z-[1] w-full lg:w-[62%]"
-        style={{
-          background:
-            "linear-gradient(100deg, rgba(5,8,5,0.94) 0%, rgba(5,8,5,0.88) 38%, rgba(5,8,5,0.55) 66%, rgba(5,8,5,0) 100%)",
-        }}
-      />
 
       {/* Climb indicator, pinned to the left edge of the column. */}
       <div

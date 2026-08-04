@@ -94,6 +94,15 @@ export type TreeBranch = {
    *  into an actual rate, because how fast it grows is not a property of the
    *  shape. */
   rateJitter: number;
+  /**
+   * World angle with the tree fully grown and the air still. The simulation
+   * recomputes this every frame with wind on top; this is the value anything
+   * outside the animation should reason about.
+   */
+  restAngle: number;
+  /** Where this branch's tip sits when fully grown and still. */
+  restX: number;
+  restY: number;
 };
 
 export type TreeSpec = {
@@ -148,6 +157,7 @@ export function buildTree({ width, height, seed, density = 1 }: TreeSpec): TreeT
     depth: number,
     parent: number,
     localAngle: number,
+    restAngle: number,
     length: number,
     strokeWidth: number,
   ): number => {
@@ -167,6 +177,10 @@ export function buildTree({ width, height, seed, density = 1 }: TreeSpec): TreeT
       breathOffset: rng() * Math.PI * 2,
       swayPhase: rng() * Math.PI * 2,
       swayGain: Math.pow(depth / Math.max(1, maxDepth), 1.5),
+      restAngle,
+      // Filled by the forward pass below, once every parent is known.
+      restX: 0,
+      restY: 0,
     });
     return index;
   };
@@ -179,7 +193,7 @@ export function buildTree({ width, height, seed, density = 1 }: TreeSpec): TreeT
   const maxWorld = rootAngle + STRUCTURE.coneRight;
 
   type Pending = { index: number; worldAngle: number };
-  const rootIndex = push("r", 0, -1, rootAngle, rootLength, STRUCTURE.rootWidth);
+  const rootIndex = push("r", 0, -1, rootAngle, rootAngle, rootLength, STRUCTURE.rootWidth);
   const queue: Pending[] = [{ index: rootIndex, worldAngle: rootAngle }];
 
   for (let head = 0; head < queue.length && branches.length < budgetNodes; head += 1) {
@@ -226,6 +240,7 @@ export function buildTree({ width, height, seed, density = 1 }: TreeSpec): TreeT
         depth,
         parent.index,
         world - parent.worldAngle,
+        world,
         length,
         strokeWidth,
       );
@@ -235,9 +250,17 @@ export function buildTree({ width, height, seed, density = 1 }: TreeSpec): TreeT
     }
   }
 
+  // Rest positions, in one forward pass — parents always precede their
+  // children, so a single sweep resolves the whole hierarchy. These are what
+  // anything outside the animation (grafting, the camera) reasons about.
   const byDepth: number[][] = Array.from({ length: maxDepth + 1 }, () => [] as number[]);
   const byId = new Map<string, number>();
   for (const branch of branches) {
+    const ax = branch.parent === -1 ? rootX : branches[branch.parent].restX;
+    const ay = branch.parent === -1 ? rootY : branches[branch.parent].restY;
+    branch.restX = ax + Math.cos(branch.restAngle) * branch.length;
+    branch.restY = ay + Math.sin(branch.restAngle) * branch.length;
+
     byDepth[branch.depth].push(branch.index);
     byId.set(branch.id, branch.index);
   }

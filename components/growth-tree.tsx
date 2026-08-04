@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { TREE_SURGE_EVENT } from "@/lib/tree-events";
 import { MOBILE_BREAKPOINT, STRUCTURE, buildTree, type TreeTopology } from "@/lib/tree/build";
+import { graftContent, type Graft, type GraftEntry } from "@/lib/tree/graft";
 import {
   MOTION,
   branchControl,
@@ -19,11 +20,14 @@ import { clamp, easeOut } from "@/lib/tree/math";
  * structure unfurls from a seed near the bottom.
  *
  * This file owns pixels and nothing else. The shape comes from
- * `lib/tree/build.ts` and the motion from `lib/tree/simulate.ts`, both of which
- * are pure and run anywhere — which is what lets the same tree be derived from
- * published content, addressed by node id, and reasoned about off-screen.
+ * `lib/tree/build.ts`, the motion from `lib/tree/simulate.ts` and the mapping
+ * from content to branches from `lib/tree/graft.ts` — all pure, all runnable
+ * without a canvas.
  *
- * Canvas 2D + rAF, no dependencies, no imports from the content layer.
+ * It is mounted once in the root layout and never unmounts, so a route change
+ * moves the camera instead of tearing the scene down. That is why the palette,
+ * the entries and the focused slug are read through refs: changing where you
+ * are must never replant the tree.
  */
 
 export type GrowthTreePalette = {
@@ -53,6 +57,9 @@ export const GROWTH_TREE_PALETTE: GrowthTreePalette = {
  */
 export const DEFAULT_TREE_SEED = 0x5eed1a3f;
 
+/** Stable identity, so the default never re-runs the effect. */
+const NO_ENTRIES: readonly GraftEntry[] = [];
+
 /** Everything about how the scene is painted, as opposed to what it is. */
 const RENDER = {
   // ── Scroll ───────────────────────────────────────────────────────────────
@@ -60,6 +67,20 @@ const RENDER = {
   cameraDrift: 300,
   /** Extra drift applied to the deepest layer, for parallax volume. */
   parallaxDepth: 190,
+
+  // ── Focus camera ─────────────────────────────────────────────────────────
+  /** Where on screen the focused node is asked to sit, as a fraction of the
+   *  viewport. Right of centre and above the middle: clear of the text. */
+  focusX: 0.66,
+  focusY: 0.42,
+  /** Hard cap on the pan, as a fraction of the viewport. The tree must never
+   *  be able to leave the frame, however far out the focused node sits. */
+  panLimit: 0.22,
+  /** Exponential approach rate. Higher settles faster. */
+  cameraEase: 2.6,
+  /** Radius of a node carrying content, and of the focused one. */
+  anchorRadius: 3.2,
+  focusRadius: 5.4,
 
   // ── Canopy veil ──────────────────────────────────────────────────────────
   /** As you climb, drifting mist rolls up through the canopy and the tree
@@ -126,6 +147,10 @@ export type GrowthTreeProps = {
    * than of chance.
    */
   seed?: number;
+  /** Published entries to graft onto branches. Changing these regrows the tree. */
+  entries?: readonly GraftEntry[];
+  /** Slug of the entry being viewed. Lights its path and moves the camera. */
+  focusSlug?: string | null;
   /** Partial palette override; unset keys fall back to `GROWTH_TREE_PALETTE`. */
   palette?: Partial<GrowthTreePalette>;
   /** Replaces the default fixed full-viewport positioning. */
@@ -133,6 +158,7 @@ export type GrowthTreeProps = {
 };
 
 type Rgb = { r: number; g: number; b: number };
+type Palette = { bg: Rgb; deep: Rgb; mid: Rgb; neon: Rgb; core: Rgb };
 
 function hexToRgb(hex: string): Rgb {
   const value = hex.replace("#", "");
@@ -156,6 +182,8 @@ export default function GrowthTree({
   density = 1,
   speed = 1,
   seed = DEFAULT_TREE_SEED,
+  entries = NO_ENTRIES,
+  focusSlug = null,
   palette,
   className,
 }: GrowthTreeProps) {
@@ -163,9 +191,9 @@ export default function GrowthTree({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Depend on the resolved strings rather than object identity, so callers can
-  // pass an inline palette literal without re-running the whole simulation.
+  // pass an inline palette literal without rebuilding anything.
   const { bg, deep, mid, neon, core } = { ...GROWTH_TREE_PALETTE, ...palette };
-  const colors = useMemo(
+  const colors = useMemo<Palette>(
     () => ({
       bg: hexToRgb(bg),
       deep: hexToRgb(deep),
@@ -174,6 +202,31 @@ export default function GrowthTree({
       core: hexToRgb(core),
     }),
     [bg, deep, mid, neon, core],
+  );
+
+  /**
+   * Read through refs so a route change never re-runs the effect. Navigating
+   * shifts the light and moves the camera; it must not replant the tree.
+   */
+  const colorsRef = useRef(colors);
+  const focusRef = useRef(focusSlug);
+  const entriesRef = useRef(entries);
+
+  // Refs are written here rather than during render — the render pass must stay
+  // free of side effects. Declared before the canvas effect so the values are
+  // already current the first time it runs. The loop picks them up on its next
+  // frame, which is a repaint away.
+  useEffect(() => {
+    colorsRef.current = colors;
+    focusRef.current = focusSlug;
+    entriesRef.current = entries;
+  });
+
+  // Regrowing is only correct when the content itself changed, so the effect
+  // depends on a stable description of the entries rather than the array.
+  const entriesKey = useMemo(
+    () => entries.map((entry) => `${entry.kind}:${entry.slug}`).join("|"),
+    [entries],
   );
 
   useEffect(() => {
@@ -211,6 +264,7 @@ export default function GrowthTree({
     let dpr = 1;
     let topology: TreeTopology | null = null;
     let sim: Simulation | null = null;
+    let graft: Graft | null = null;
     let trunkGradient: CanvasGradient | null = null;
     let scrollProgress = 0;
     let scrollRange = 0;
@@ -220,11 +274,21 @@ export default function GrowthTree({
     let lastTime = 0;
     let onScreen = true;
 
+    /** The palette the gradient and backdrops were last baked with. */
+    let bakedColors: Palette | null = null;
+
+    // Focus camera. Pan only — no zoom, so the baked backdrops stay valid.
+    let focusIndex = -1;
+    let panX = 0;
+    let panY = 0;
+    let panTargetX = 0;
+    let panTargetY = 0;
+
     /**
      * Height-based colour ramp: emerald at the roots, mint at the tips. Applied
      * as a gradient on the stroke so it survives per-depth batching.
      */
-    const buildGradient = (tree: TreeTopology): void => {
+    const buildGradient = (tree: TreeTopology, paint: Palette): void => {
       const reach = (tree.rootLength / (1 - STRUCTURE.lengthFalloff)) * 0.85;
       const gradient = ctx.createLinearGradient(
         0,
@@ -232,10 +296,10 @@ export default function GrowthTree({
         0,
         Math.max(0, tree.rootY - reach),
       );
-      gradient.addColorStop(0, rgba(colors.deep, 1));
-      gradient.addColorStop(0.45, rgba(colors.mid, 1));
-      gradient.addColorStop(0.85, rgba(colors.core, 1));
-      gradient.addColorStop(1, rgba(colors.core, 1));
+      gradient.addColorStop(0, rgba(paint.deep, 1));
+      gradient.addColorStop(0.45, rgba(paint.mid, 1));
+      gradient.addColorStop(0.85, rgba(paint.core, 1));
+      gradient.addColorStop(1, rgba(paint.core, 1));
       trunkGradient = gradient;
     };
 
@@ -243,7 +307,41 @@ export default function GrowthTree({
     const plant = (): void => {
       topology = buildTree({ width, height, seed, density });
       sim = createSimulation(topology, { speed, seed });
-      buildGradient(topology);
+      graft = graftContent(topology, entriesRef.current);
+      // A replant invalidates the resolved focus — indices are per-topology.
+      focusIndex = -1;
+    };
+
+    /**
+     * Points the camera at the entry being viewed. Pan is clamped hard: the
+     * canopy must stay in frame no matter how far out the node sits.
+     */
+    const retarget = (): void => {
+      if (focusIndex === -1 || !topology) {
+        panTargetX = 0;
+        panTargetY = 0;
+        return;
+      }
+      const branch = topology.branches[focusIndex];
+      panTargetX = clamp(
+        width * RENDER.focusX - branch.restX,
+        -width * RENDER.panLimit,
+        width * RENDER.panLimit,
+      );
+      panTargetY = clamp(
+        height * RENDER.focusY - branch.restY,
+        -height * RENDER.panLimit,
+        height * RENDER.panLimit,
+      );
+    };
+
+    /** Resolves the focused slug against the current topology, once per frame. */
+    const readFocus = (): void => {
+      const slug = focusRef.current;
+      const next = slug && graft ? (graft.bySlug.get(slug) ?? -1) : -1;
+      if (next === focusIndex) return;
+      focusIndex = next;
+      retarget();
     };
 
     /**
@@ -252,11 +350,15 @@ export default function GrowthTree({
      */
     const drawInto = (target: CanvasRenderingContext2D, clear: boolean): void => {
       if (!topology || !sim) return;
+      const paint = colorsRef.current;
       const { byDepth, maxDepth } = topology;
       const { branches, pulses, spores, sparks, elapsed } = sim;
 
       target.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // Cleared before the pan is applied, so the whole buffer is wiped rather
+      // than a panned rectangle of it.
       if (clear) target.clearRect(0, 0, width, height);
+      target.translate(panX, panY);
       target.globalCompositeOperation = "lighter";
       target.lineCap = "round";
       target.lineJoin = "round";
@@ -281,7 +383,7 @@ export default function GrowthTree({
 
         target.save();
         target.translate(0, parallax);
-        target.strokeStyle = trunkGradient ?? rgba(colors.mid, 1);
+        target.strokeStyle = trunkGradient ?? rgba(paint.mid, 1);
         // Atmospheric dimming: distance into the canopy fades out.
         target.globalAlpha = (0.92 - 0.4 * depthT) * treeAlpha;
         target.lineWidth = Math.max(
@@ -302,13 +404,35 @@ export default function GrowthTree({
         target.restore();
       }
 
+      // The route made visible: the path from the root to whatever you are
+      // reading. Each branch carries its own parallax, so no global translate —
+      // and each has its own width, so they cannot share one path.
+      if (focusIndex !== -1) {
+        target.globalAlpha = treeAlpha;
+        target.strokeStyle = rgba(paint.neon, 0.9);
+        target.shadowBlur = RENDER.glowBlur * 1.6;
+        target.shadowColor = rgba(paint.neon, 1);
+        for (let i = focusIndex; i !== -1; i = branches[i].parent) {
+          const branch = branches[i];
+          if (!branch.active || branch.progress <= 0) continue;
+          const shift = depthShift(branch.depth);
+          const { cx, cy } = branchControl(branch);
+          target.lineWidth = Math.max(1.2, branch.width * 0.85);
+          target.beginPath();
+          target.moveTo(branch.ax, branch.ay + shift);
+          target.quadraticCurveTo(cx, cy + shift, branch.bx, branch.by + shift);
+          target.stroke();
+        }
+        target.shadowBlur = 0;
+      }
+
       // Bright leading edge of everything still growing. No global translate:
       // each head carries its own branch's parallax so it stays welded on.
       target.globalAlpha = treeAlpha;
-      target.strokeStyle = rgba(colors.neon, 0.8);
+      target.strokeStyle = rgba(paint.neon, 0.8);
       target.lineWidth = 1.6;
       target.shadowBlur = RENDER.glowBlur * 1.4;
-      target.shadowColor = rgba(colors.neon, 0.9);
+      target.shadowColor = rgba(paint.neon, 0.9);
       target.beginPath();
       for (const branch of branches) {
         if (!branch.active || branch.progress <= 0 || branch.progress >= 1) continue;
@@ -331,7 +455,7 @@ export default function GrowthTree({
 
         target.save();
         target.translate(0, parallax);
-        target.fillStyle = rgba(colors.core, 1);
+        target.fillStyle = rgba(paint.core, 1);
         target.globalAlpha = (0.95 - 0.45 * depthT) * treeAlpha;
         target.shadowBlur = 0;
 
@@ -352,14 +476,39 @@ export default function GrowthTree({
         target.restore();
       }
 
+      // Branches that are actually something you published, drawn heavier than
+      // the filler around them. This is what makes the canopy read as content
+      // rather than as decoration.
+      if (graft && graft.anchors.length > 0) {
+        target.globalAlpha = treeAlpha;
+        target.fillStyle = rgba(paint.core, 1);
+        target.shadowBlur = RENDER.glowBlur;
+        target.shadowColor = rgba(paint.neon, 0.9);
+        target.beginPath();
+        for (const index of graft.anchors) {
+          const branch = branches[index];
+          if (!branch || !branch.active || branch.progress < 0.98) continue;
+          const shift = depthShift(branch.depth);
+          const breath =
+            1 +
+            Math.sin(elapsed * MOTION.breathSpeed + branch.breathOffset) * MOTION.breathAmount;
+          const radius =
+            (index === focusIndex ? RENDER.focusRadius : RENDER.anchorRadius) * breath;
+          target.moveTo(branch.bx + radius, branch.by + shift);
+          target.arc(branch.bx, branch.by + shift, radius, 0, Math.PI * 2);
+        }
+        target.fill();
+        target.shadowBlur = 0;
+      }
+
       // Data pulses ride the branch's rendered curve and pick up the same
       // per-depth parallax as the edge they travel along. Interpolating the
       // chord instead is what made them drift off the branch.
       if (pulses.length > 0) {
         target.globalAlpha = treeAlpha;
-        target.fillStyle = rgba(colors.core, 0.95);
+        target.fillStyle = rgba(paint.core, 0.95);
         target.shadowBlur = RENDER.glowBlur * 1.5;
-        target.shadowColor = rgba(colors.neon, 1);
+        target.shadowColor = rgba(paint.neon, 1);
         target.beginPath();
         for (const pulse of pulses) {
           const branch = branches[pulse.branch];
@@ -384,7 +533,7 @@ export default function GrowthTree({
       const sporeGain = 1 + scrollProgress * RENDER.veilSporeGain;
       const sporeSwell = 1 + scrollProgress * RENDER.veilSporeSwell;
       for (let tier = 0; tier < 3; tier += 1) {
-        target.fillStyle = rgba(colors.mid, Math.min(1, (0.18 + tier * 0.14) * sporeGain));
+        target.fillStyle = rgba(paint.mid, Math.min(1, (0.18 + tier * 0.14) * sporeGain));
         target.beginPath();
         for (let i = tier; i < spores.length; i += 3) {
           const spore = spores[i];
@@ -399,7 +548,7 @@ export default function GrowthTree({
       if (sparks.length > 0) {
         target.shadowBlur = 0;
         for (let tier = 0; tier < 3; tier += 1) {
-          target.fillStyle = rgba(colors.neon, 0.15 + tier * 0.2);
+          target.fillStyle = rgba(paint.neon, 0.15 + tier * 0.2);
           target.beginPath();
           for (let i = tier; i < sparks.length; i += 3) {
             const spark = sparks[i];
@@ -417,11 +566,12 @@ export default function GrowthTree({
     };
 
     /**
-     * Bakes the ground glow and vignette once per resize. Both are smooth
-     * radial gradients over the full viewport; evaluating them per pixel every
-     * frame was two of the most expensive operations in the loop.
+     * Bakes the ground glow and vignette once per resize — and once per palette
+     * change, since the glow is tinted. Both are smooth radial gradients over
+     * the full viewport; evaluating them per pixel every frame was two of the
+     * most expensive operations in the loop.
      */
-    const bakeBackdrops = (): void => {
+    const bakeBackdrops = (paint: Palette): void => {
       if (!topology) return;
       const bw = Math.max(1, Math.round(width * RENDER.backdropScale));
       const bh = Math.max(1, Math.round(height * RENDER.backdropScale));
@@ -439,9 +589,9 @@ export default function GrowthTree({
         topology.rootY * scale,
         glowRadius,
       );
-      glow.addColorStop(0, rgba(colors.deep, 0.55));
-      glow.addColorStop(0.5, rgba(colors.deep, 0.16));
-      glow.addColorStop(1, rgba(colors.deep, 0));
+      glow.addColorStop(0, rgba(paint.deep, 0.55));
+      glow.addColorStop(0.5, rgba(paint.deep, 0.16));
+      glow.addColorStop(1, rgba(paint.deep, 0));
       glowCtx.fillStyle = glow;
       glowCtx.fillRect(0, 0, bw, bh);
 
@@ -483,6 +633,15 @@ export default function GrowthTree({
       mistCtx.fillRect(0, 0, mistSize, mistSize);
     };
 
+    /** Re-bakes anything tinted when the route shifts the light. */
+    const syncPalette = (): void => {
+      const paint = colorsRef.current;
+      if (paint === bakedColors || !topology) return;
+      bakedColors = paint;
+      buildGradient(topology, paint);
+      bakeBackdrops(paint);
+    };
+
     /**
      * Drifting mist that rolls up through the canopy as you scroll. Seven
      * scaled blits of one cached blob — cheap enough to run alongside
@@ -512,15 +671,19 @@ export default function GrowthTree({
     };
 
     const draw = (): void => {
+      const paint = colorsRef.current;
+
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
-      ctx.fillStyle = rgba(colors.bg, 1);
+      ctx.fillStyle = rgba(paint.bg, 1);
       ctx.fillRect(0, 0, width, height);
 
-      // Ground glow rides the camera, so it is blitted with the scroll offset.
+      // The ground glow is part of the scene, so it takes the camera pan as
+      // well as the scroll offset. The vignette and the veil deliberately do
+      // not — they are lens and atmosphere, not geometry.
       const camera = scrollProgress * RENDER.cameraDrift;
-      ctx.drawImage(glowCanvas, 0, camera, width, height);
+      ctx.drawImage(glowCanvas, panX, camera + panY, width, height);
 
       if (bloomOn) {
         // Render once into the scene buffer, then composite it twice.
@@ -567,6 +730,14 @@ export default function GrowthTree({
       if (pending < frameInterval) return;
 
       const started = performance.now();
+      syncPalette();
+      readFocus();
+      // Exponential approach, framerate-independent, so the capped and
+      // scroll-throttled rates all settle over the same wall-clock time.
+      const k = 1 - Math.exp(-pending * RENDER.cameraEase);
+      panX += (panTargetX - panX) * k;
+      panY += (panTargetY - panY) * k;
+
       sim.step(pending);
       sim.solve(sim.elapsed, true);
       draw();
@@ -601,6 +772,12 @@ export default function GrowthTree({
       stop();
       if (!sim) return;
       if (reduceMotion.matches) {
+        // No loop to ease anything, so the camera snaps and the tree is drawn
+        // already grown. One frame, no motion.
+        syncPalette();
+        readFocus();
+        panX = panTargetX;
+        panY = panTargetY;
         sim.settle();
         sim.solve(0, false);
         draw();
@@ -645,8 +822,13 @@ export default function GrowthTree({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       plant();
-      bakeBackdrops();
+      // A new topology means the old bake is stale whatever the palette is.
+      bakedColors = null;
+      syncPalette();
       measureScrollRange();
+      readFocus();
+      panX = panTargetX;
+      panY = panTargetY;
       sim?.solve(0, false);
       render();
     };
@@ -714,6 +896,8 @@ export default function GrowthTree({
 
     // The document grows and shrinks independently of the viewport, so the
     // cached scroll range is refreshed from an observer rather than on scroll.
+    // It also fires on every navigation, which is what keeps the range honest
+    // now that the canvas outlives the page under it.
     const bodyObserver = new ResizeObserver(() => measureScrollRange());
     bodyObserver.observe(document.body);
 
@@ -745,7 +929,7 @@ export default function GrowthTree({
       document.removeEventListener("visibilitychange", onVisibility);
       reduceMotion.removeEventListener("change", onMotionChange);
     };
-  }, [density, speed, seed, colors]);
+  }, [density, speed, seed, entriesKey]);
 
   return (
     <div

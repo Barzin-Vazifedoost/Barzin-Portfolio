@@ -3,7 +3,6 @@ import { getFeaturedProjects, getProjects } from "@/lib/content/projects";
 import { getPosts, getRecentPosts } from "@/lib/content/posts";
 import { formatDate } from "@/lib/format";
 import { site } from "@/lib/site";
-import { hashSeed } from "@/lib/tree/math";
 
 export default async function HomePage() {
   const [featured, recent, allProjects, allPosts] = await Promise.all([
@@ -31,20 +30,8 @@ export default async function HomePage() {
     meta: `${formatDate(post.frontmatter.date)} · ${post.readingTimeMinutes} min`,
   }));
 
-  // The canopy grows with the portfolio.
-  const published = allProjects.length + allPosts.length;
-  const density = Math.min(1.8, 0.85 + published * 0.06);
-
-  // ...and its shape is derived from the portfolio too. Sorted so a directory
-  // listing coming back in a different order cannot reshape the tree; only
-  // publishing, renaming or removing an entry does.
-  const seed = hashSeed(
-    [
-      ...allProjects.map((project) => `project:${project.slug}`),
-      ...allPosts.map((post) => `post:${post.slug}`),
-    ].sort(),
-  );
-
+  // The tree itself — its shape, density and content anchors — is assembled
+  // once in the root layout, so this page only describes itself.
   return (
     <HomeScene
       name={site.name}
@@ -53,8 +40,6 @@ export default async function HomePage() {
       projects={projects}
       posts={posts}
       counts={{ projects: allProjects.length, posts: allPosts.length }}
-      density={density}
-      seed={seed}
     />
   );
 }
