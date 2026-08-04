@@ -71,6 +71,12 @@ export type HomeSceneProps = {
   counts: { projects: number; posts: number };
   /** Canopy density, derived server-side from how much is published. */
   density: number;
+  /**
+   * Decides the tree's shape. Hashed server-side from the published slugs, so
+   * the canopy is a function of the work: stable across visits and reloads,
+   * and reshaped only by publishing something.
+   */
+  seed: number;
 };
 
 /**
@@ -244,6 +250,7 @@ export default function HomeScene({
   posts,
   counts,
   density,
+  seed,
 }: HomeSceneProps) {
   const reduced = useReducedMotion();
   const { scrollYProgress } = useScroll();
@@ -263,7 +270,7 @@ export default function HomeScene({
         <style>{`[data-reveal]{opacity:1 !important;transform:none !important;}`}</style>
       </noscript>
 
-      <GrowthTree density={density} />
+      <GrowthTree density={density} seed={seed} />
 
       {/* Legibility scrim: keeps branches from fighting the words. */}
       <div

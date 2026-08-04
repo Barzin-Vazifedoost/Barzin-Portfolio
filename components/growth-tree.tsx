@@ -3,17 +3,27 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import { TREE_SURGE_EVENT } from "@/lib/tree-events";
+import { MOBILE_BREAKPOINT, STRUCTURE, buildTree, type TreeTopology } from "@/lib/tree/build";
+import {
+  MOTION,
+  branchControl,
+  createSimulation,
+  pointOnBranch,
+  type Simulation,
+} from "@/lib/tree/simulate";
+import { clamp, easeOut } from "@/lib/tree/math";
 
 /**
- * A hybrid organic-tree / data-graph background. Branches are edges, junctions
- * and tips are nodes, and the structure unfurls from a seed near the bottom.
+ * The renderer for the growth tree: a hybrid organic-tree / data-graph
+ * background where branches are edges, junctions and tips are nodes, and the
+ * structure unfurls from a seed near the bottom.
  *
- * Self-contained by design: Canvas 2D + rAF, no dependencies, no imports from
- * the content layer. Everything it needs arrives as props, so the server stays
- * the only thing that touches `content/`.
+ * This file owns pixels and nothing else. The shape comes from
+ * `lib/tree/build.ts` and the motion from `lib/tree/simulate.ts`, both of which
+ * are pure and run anywhere — which is what lets the same tree be derived from
+ * published content, addressed by node id, and reasoned about off-screen.
  *
- * Branches store an angle *relative to their parent*, which is what lets wind
- * sway accumulate down the hierarchy instead of being faked per-branch.
+ * Canvas 2D + rAF, no dependencies, no imports from the content layer.
  */
 
 export type GrowthTreePalette = {
@@ -37,81 +47,14 @@ export const GROWTH_TREE_PALETTE: GrowthTreePalette = {
 };
 
 /**
- * Every tunable lives here. Props scale these at runtime; the constants are the
- * shape and behaviour of the plant itself.
+ * Used when no seed is supplied. A constant rather than `Math.random()`: the
+ * tree's shape is the site's identity, so even an unseeded tree should be the
+ * same tree every time.
  */
-const TUNING = {
-  // ── Structure ────────────────────────────────────────────────────────────
-  /** Recursion levels on a desktop viewport. */
-  maxDepth: 9,
-  /** Hard ceiling on branches (= nodes). */
-  maxNodes: 700,
-  /** Children per junction. */
-  minChildren: 2,
-  maxChildren: 3,
-  /** Odds a junction continues as a single shoot instead of forking. */
-  singleChildChance: 0.18,
-  /** Per-level falloff — what makes it read botanical rather than mechanical. */
-  lengthFalloff: 0.79,
-  widthFalloff: 0.74,
-  /** Root length as a fraction of the smaller viewport axis. */
-  rootLengthRatio: 0.19,
-  rootWidth: 10,
-  /** Trunk position across the viewport. Left of centre: the text column sits
-   *  to its left, the canopy opens to the right. */
-  rootXRatio: 0.44,
-  /** Seed sits slightly below the fold so the trunk enters from off-screen. */
-  rootYOffset: 40,
-  /** Fork half-angle and organic jitter (radians). */
-  branchSpread: 0.52,
-  angleJitter: 0.3,
-  /** Forks narrow by this fraction by the time they reach `maxDepth`. */
-  spreadDecay: 0.45,
-  /** Restoring pull toward vertical, applied in world space each level. */
-  gravitropism: 0.16,
-  /** Whole-tree tilt, applied once at the root. A per-level bias would
-   *  accumulate and spiral the canopy, which is not what this is for. */
-  rootTilt: 0.14,
-  /** Hard limits on how far any branch may deviate from the root angle.
-   *  Asymmetric: the canopy opens wider away from the text column. */
-  coneLeft: 0.95,
-  coneRight: 1.3,
-  /** Branches pointing right run this much longer. Applied once per branch,
-   *  never compounded down the chain. */
-  leanLengthBonus: 0.14,
-  /** Per-branch bend of the quadratic curve, as a fraction of its length. */
-  curvature: 0.07,
+export const DEFAULT_TREE_SEED = 0x5eed1a3f;
 
-  // ── Growth ───────────────────────────────────────────────────────────────
-  /** Seconds for the deepest chain to unfurl at `speed = 1`. */
-  growthSeconds: 5.5,
-  /** A branch spawns its children once its own progress crosses this. */
-  spawnThreshold: 0.62,
-
-  // ── Wind ─────────────────────────────────────────────────────────────────
-  windSpeed: 0.55,
-  /** Radians of sway at the tips, accumulated down the chain. */
-  windAmount: 0.055,
-
-  // ── Data pulses ──────────────────────────────────────────────────────────
-  pulseIntervalSeconds: 0.42,
-  pulsePixelsPerSecond: 210,
-  maxPulses: 64,
-  /** Pulses injected per hover surge. */
-  surgePulses: 5,
-
-  // ── Particles ────────────────────────────────────────────────────────────
-  sporesPerMegapixel: 46,
-  maxSpores: 120,
-  sporeRisePixelsPerSecond: 14,
-  sparkChancePerSecond: 5,
-  maxSparks: 80,
-  sparkLifeSeconds: 1.1,
-
-  // ── Nodes ────────────────────────────────────────────────────────────────
-  breathSpeed: 1.7,
-  breathAmount: 0.34,
-
+/** Everything about how the scene is painted, as opposed to what it is. */
+const RENDER = {
   // ── Scroll ───────────────────────────────────────────────────────────────
   /** Pixels the whole scene drifts down as you scroll top → bottom. */
   cameraDrift: 300,
@@ -138,7 +81,7 @@ const TUNING = {
   bloomScale: 0.3,
   bloomBlur: 8,
   bloomStrength: 0.9,
-  /** Shadow radius, now used only on the few small bright passes. */
+  /** Shadow radius, used only on the few small bright passes. */
   glowBlur: 10,
   vignetteStrength: 0.72,
   groundGlowRadius: 0.55,
@@ -151,8 +94,8 @@ const TUNING = {
   /** Render cap. Ambient motion reads fine well below 60, and this is the
    *  single biggest saving on a busy page. */
   targetFps: 30,
-  /** Reduced cap while the user is actively scrolling: the main thread is
-   *  busy with the DOM then, and the tree is not what is being looked at. */
+  /** Reduced cap while the user is actively scrolling: the main thread is busy
+   *  with the DOM then, and the tree is not what is being looked at. */
   scrollFps: 18,
   /** How long after the last scroll event to keep using `scrollFps`. */
   scrollQuietMs: 180,
@@ -162,14 +105,14 @@ const TUNING = {
   slowFrameLimit: 40,
 
   // ── Budgets ──────────────────────────────────────────────────────────────
-  mobileBreakpoint: 640,
-  mobileDepthDrop: 2,
-  mobileNodeScale: 0.45,
-  mobileSporeScale: 0.4,
   /** Well below retina on purpose: the canvas is a soft, bloomed glow, so
    *  extra pixels buy almost nothing visible and cost a lot. */
   maxDpr: 1.25,
   mobileDpr: 1,
+
+  // ── Interaction ──────────────────────────────────────────────────────────
+  /** Strength of the gust a click sends through the canopy. */
+  clickGust: 1,
 } as const;
 
 export type GrowthTreeProps = {
@@ -177,6 +120,12 @@ export type GrowthTreeProps = {
   density?: number;
   /** Growth and pulse rate multiplier. 1 = default. Clamped to 0.25–3. */
   speed?: number;
+  /**
+   * Decides the shape. Pass a hash of what has been published — see `hashSeed`
+   * in `lib/tree/math.ts` — so the canopy is a function of the work rather
+   * than of chance.
+   */
+  seed?: number;
   /** Partial palette override; unset keys fall back to `GROWTH_TREE_PALETTE`. */
   palette?: Partial<GrowthTreePalette>;
   /** Replaces the default fixed full-viewport positioning. */
@@ -184,42 +133,6 @@ export type GrowthTreeProps = {
 };
 
 type Rgb = { r: number; g: number; b: number };
-
-type Branch = {
-  depth: number;
-  /** Index of the parent branch, or -1 for the root. Always < own index. */
-  parent: number;
-  /** Angle relative to the parent's world angle. Absolute for the root. */
-  localAngle: number;
-  length: number;
-  width: number;
-  /** Signed bend applied to the quadratic control point. */
-  curve: number;
-  /** 0 → 1. Children activate once this crosses `spawnThreshold`. */
-  progress: number;
-  rate: number;
-  active: boolean;
-  spawned: boolean;
-  children: number[];
-  isTip: boolean;
-  breathOffset: number;
-  swayPhase: number;
-  swayGain: number;
-  /** Recomputed every frame by `solve`. */
-  worldAngle: number;
-  ax: number;
-  ay: number;
-  bx: number;
-  by: number;
-};
-
-type Pulse = { branch: number; t: number; bright: number };
-type Spore = { x: number; y: number; drift: number; rise: number; radius: number; phase: number };
-type Spark = { x: number; y: number; vx: number; vy: number; life: number };
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 function hexToRgb(hex: string): Rgb {
   const value = hex.replace("#", "");
@@ -239,49 +152,10 @@ function rgba(color: Rgb, alpha: number): string {
   return `rgba(${Math.round(color.r)}, ${Math.round(color.g)}, ${Math.round(color.b)}, ${alpha})`;
 }
 
-/** mulberry32 — deterministic per seed, so a replant is reproducible. */
-function createRng(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const easeOut = (t: number): number => 1 - Math.pow(1 - t, 3);
-
-/**
- * Control point of a branch's quadratic curve. Anything that has to sit on a
- * branch must derive its position from this, or it drifts off the rendered
- * path — the chord between the endpoints is not the shape being drawn.
- */
-function branchControl(branch: Branch): { cx: number; cy: number } {
-  const dx = branch.bx - branch.ax;
-  const dy = branch.by - branch.ay;
-  return {
-    cx: (branch.ax + branch.bx) / 2 - dy * branch.curve,
-    cy: (branch.ay + branch.by) / 2 + dx * branch.curve,
-  };
-}
-
-/** Point at `t` (0–1) along the branch's rendered curve. */
-function pointOnBranch(branch: Branch, t: number): { x: number; y: number } {
-  const { cx, cy } = branchControl(branch);
-  const inv = 1 - t;
-  const a = inv * inv;
-  const b = 2 * inv * t;
-  const c = t * t;
-  return {
-    x: a * branch.ax + b * cx + c * branch.bx,
-    y: a * branch.ay + b * cy + c * branch.by,
-  };
-}
-
 export default function GrowthTree({
   density = 1,
   speed = 1,
+  seed = DEFAULT_TREE_SEED,
   palette,
   className,
 }: GrowthTreeProps) {
@@ -330,158 +204,34 @@ export default function GrowthTree({
     let bloomOn = typeof sceneCtx.filter === "string";
     let slowFrames = 0;
 
-    const densityScale = clamp(density, 0.4, 2);
-    const speedScale = clamp(speed, 0.25, 3);
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     let width = 0;
     let height = 0;
     let dpr = 1;
-    let maxDepth: number = TUNING.maxDepth;
-    let rootX = 0;
-    let rootY = 0;
-    let branches: Branch[] = [];
-    let byDepth: number[][] = [];
-    let pulses: Pulse[] = [];
-    let spores: Spore[] = [];
-    let sparks: Spark[] = [];
+    let topology: TreeTopology | null = null;
+    let sim: Simulation | null = null;
     let trunkGradient: CanvasGradient | null = null;
-    let elapsed = 0;
-    let sincePulse = 0;
     let scrollProgress = 0;
     let scrollRange = 0;
     let pending = 0;
     let lastScrollAt = 0;
-    let seed = Math.floor(Math.random() * 0xffffffff);
     let frameId = 0;
     let lastTime = 0;
     let onScreen = true;
-
-    const buildTree = (rng: () => number, budgetNodes: number): void => {
-      branches = [];
-      const rootLength = Math.min(width, height) * TUNING.rootLengthRatio;
-      const perBranch =
-        TUNING.growthSeconds / (1 + TUNING.spawnThreshold * Math.max(1, maxDepth - 1));
-
-      type Pending = { index: number; worldAngle: number };
-
-      const push = (
-        depth: number,
-        parent: number,
-        localAngle: number,
-        length: number,
-        strokeWidth: number,
-      ): number => {
-        const index = branches.length;
-        branches.push({
-          depth,
-          parent,
-          localAngle,
-          length,
-          width: strokeWidth,
-          curve: (rng() - 0.5) * 2 * TUNING.curvature,
-          progress: 0,
-          rate: (1 / perBranch) * (0.82 + rng() * 0.36) * speedScale,
-          active: depth === 0,
-          spawned: false,
-          children: [],
-          isTip: true,
-          breathOffset: rng() * Math.PI * 2,
-          swayPhase: rng() * Math.PI * 2,
-          // Tips sway most; the trunk barely moves.
-          swayGain: Math.pow(depth / Math.max(1, maxDepth), 1.5),
-          worldAngle: 0,
-          ax: 0,
-          ay: 0,
-          bx: 0,
-          by: 0,
-        });
-        return index;
-      };
-
-      const rootAngle = -Math.PI / 2 + TUNING.rootTilt;
-      // Hard cone around vertical. Without this, a chain that keeps taking the
-      // same fork accumulates unbounded rotation and curls into a spiral —
-      // gravitropism alone is far too weak to hold ±branchSpread per level.
-      const minWorld = rootAngle - TUNING.coneLeft;
-      const maxWorld = rootAngle + TUNING.coneRight;
-
-      const rootIndex = push(0, -1, rootAngle, rootLength, TUNING.rootWidth);
-      const queue: Pending[] = [
-        { index: rootIndex, worldAngle: rootAngle },
-      ];
-
-      for (let head = 0; head < queue.length && branches.length < budgetNodes; head += 1) {
-        const parent = queue[head];
-        const parentBranch = branches[parent.index];
-        if (parentBranch.depth >= maxDepth) continue;
-
-        const depth = parentBranch.depth + 1;
-        const forks =
-          rng() < TUNING.singleChildChance
-            ? 1
-            : TUNING.minChildren +
-              Math.floor(rng() * (TUNING.maxChildren - TUNING.minChildren + 1));
-
-        // Forks narrow with depth, the way real branching does.
-        const spreadScale =
-          TUNING.branchSpread * (1 - TUNING.spreadDecay * (depth / Math.max(1, maxDepth)));
-
-        for (let i = 0; i < forks; i += 1) {
-          if (branches.length >= budgetNodes) break;
-
-          const spread = forks === 1 ? 0 : (i / (forks - 1) - 0.5) * 2;
-
-          // Composed in WORLD space: gravitropism has to pull the absolute
-          // angle back toward vertical. Applying it to the parent-relative
-          // angle (as this did) is not a restoring force at all.
-          let world = parent.worldAngle + spread * spreadScale + (rng() - 0.5) * TUNING.angleJitter;
-          world += (rootAngle - world) * TUNING.gravitropism;
-          world = clamp(world, minWorld, maxWorld);
-
-          // Length is derived from depth rather than multiplied down the
-          // chain, so the rightward bonus cannot compound into branches that
-          // are longer than the trunk.
-          const rightness = Math.max(0, Math.cos(world));
-          const length =
-            rootLength *
-            Math.pow(TUNING.lengthFalloff, depth) *
-            (0.86 + rng() * 0.28) *
-            (1 + TUNING.leanLengthBonus * rightness);
-          const strokeWidth = TUNING.rootWidth * Math.pow(TUNING.widthFalloff, depth);
-
-          const index = push(depth, parent.index, world - parent.worldAngle, length, strokeWidth);
-          parentBranch.children.push(index);
-          parentBranch.isTip = false;
-          queue.push({ index, worldAngle: world });
-        }
-      }
-
-      byDepth = Array.from({ length: maxDepth + 1 }, () => [] as number[]);
-      for (const [index, branch] of branches.entries()) {
-        byDepth[branch.depth].push(index);
-      }
-    };
-
-    const seedSpores = (rng: () => number, budgetSpores: number): void => {
-      spores = Array.from({ length: budgetSpores }, () => ({
-        x: rng() * width,
-        y: rng() * height,
-        drift: 6 + rng() * 14,
-        rise: TUNING.sporeRisePixelsPerSecond * (0.5 + rng()),
-        radius: 0.6 + rng() * 1.5,
-        phase: rng() * Math.PI * 2,
-      }));
-    };
 
     /**
      * Height-based colour ramp: emerald at the roots, mint at the tips. Applied
      * as a gradient on the stroke so it survives per-depth batching.
      */
-    const buildGradient = (): void => {
-      const rootLength = Math.min(width, height) * TUNING.rootLengthRatio;
-      const reach = (rootLength / (1 - TUNING.lengthFalloff)) * 0.85;
-      const gradient = ctx.createLinearGradient(0, rootY, 0, Math.max(0, rootY - reach));
+    const buildGradient = (tree: TreeTopology): void => {
+      const reach = (tree.rootLength / (1 - STRUCTURE.lengthFalloff)) * 0.85;
+      const gradient = ctx.createLinearGradient(
+        0,
+        tree.rootY,
+        0,
+        Math.max(0, tree.rootY - reach),
+      );
       gradient.addColorStop(0, rgba(colors.deep, 1));
       gradient.addColorStop(0.45, rgba(colors.mid, 1));
       gradient.addColorStop(0.85, rgba(colors.core, 1));
@@ -489,138 +239,11 @@ export default function GrowthTree({
       trunkGradient = gradient;
     };
 
+    /** Grows a fresh tree for the current viewport. Same seed, same shape. */
     const plant = (): void => {
-      const rng = createRng(seed);
-      const isSmall = width < TUNING.mobileBreakpoint;
-
-      maxDepth = clamp(TUNING.maxDepth - (isSmall ? TUNING.mobileDepthDrop : 0), 5, 10);
-      rootX = width * (isSmall ? 0.5 : TUNING.rootXRatio);
-      rootY = height + TUNING.rootYOffset;
-
-      const budgetNodes = Math.max(
-        24,
-        Math.round(TUNING.maxNodes * densityScale * (isSmall ? TUNING.mobileNodeScale : 1)),
-      );
-      const budgetSpores = Math.round(
-        Math.min(
-          TUNING.maxSpores,
-          ((width * height) / 1_000_000) *
-            TUNING.sporesPerMegapixel *
-            densityScale *
-            (isSmall ? TUNING.mobileSporeScale : 1),
-        ),
-      );
-
-      buildTree(rng, budgetNodes);
-      seedSpores(rng, Math.max(0, budgetSpores));
-      buildGradient();
-      pulses = [];
-      sparks = [];
-      elapsed = 0;
-      sincePulse = 0;
-    };
-
-    /**
-     * Resolves world angles and endpoints for the whole hierarchy in one pass.
-     * Parents always precede children in the array, so a single forward loop is
-     * enough — and sway accumulates naturally from trunk to tip.
-     */
-    const solve = (time: number, sway: boolean): void => {
-      for (const branch of branches) {
-        const wobble = sway
-          ? Math.sin(time * TUNING.windSpeed + branch.swayPhase) *
-            branch.swayGain *
-            TUNING.windAmount
-          : 0;
-
-        if (branch.parent === -1) {
-          branch.worldAngle = branch.localAngle + wobble;
-          branch.ax = rootX;
-          branch.ay = rootY;
-        } else {
-          const parent = branches[branch.parent];
-          branch.worldAngle = parent.worldAngle + branch.localAngle + wobble;
-          branch.ax = parent.bx;
-          branch.ay = parent.by;
-        }
-
-        const reach = branch.length * easeOut(branch.progress);
-        branch.bx = branch.ax + Math.cos(branch.worldAngle) * reach;
-        branch.by = branch.ay + Math.sin(branch.worldAngle) * reach;
-      }
-    };
-
-    const surge = (): void => {
-      for (let i = 0; i < TUNING.surgePulses; i += 1) {
-        if (pulses.length >= TUNING.maxPulses) break;
-        pulses.push({ branch: 0, t: (i / TUNING.surgePulses) * 0.6, bright: 1.6 });
-      }
-    };
-
-    const step = (dt: number): void => {
-      elapsed += dt;
-
-      for (const branch of branches) {
-        if (!branch.active || branch.progress >= 1) continue;
-        branch.progress = Math.min(1, branch.progress + dt * branch.rate);
-
-        if (!branch.spawned && branch.progress >= TUNING.spawnThreshold) {
-          branch.spawned = true;
-          for (const child of branch.children) branches[child].active = true;
-        }
-
-        if (branch.isTip && sparks.length < TUNING.maxSparks) {
-          if (Math.random() < TUNING.sparkChancePerSecond * dt) {
-            sparks.push({
-              x: branch.bx,
-              y: branch.by,
-              vx: (Math.random() - 0.5) * 22,
-              vy: -12 - Math.random() * 26,
-              life: TUNING.sparkLifeSeconds,
-            });
-          }
-        }
-      }
-
-      sincePulse += dt;
-      const interval = TUNING.pulseIntervalSeconds / speedScale;
-      if (sincePulse >= interval && branches.length > 0) {
-        sincePulse -= interval;
-        if (pulses.length < TUNING.maxPulses && branches[0].progress > 0.2) {
-          pulses.push({ branch: 0, t: 0, bright: 1 });
-        }
-      }
-
-      const pulseSpeed = TUNING.pulsePixelsPerSecond * speedScale;
-      pulses = pulses.filter((pulse) => {
-        const branch = branches[pulse.branch];
-        if (!branch) return false;
-        pulse.t += (dt * pulseSpeed) / Math.max(1, branch.length);
-        if (pulse.t < 1) return true;
-
-        const grown = branch.children.filter((child) => branches[child].progress > 0.35);
-        if (grown.length === 0) return false;
-        pulse.branch = grown[Math.floor(Math.random() * grown.length)];
-        pulse.t = 0;
-        return true;
-      });
-
-      for (const spore of spores) {
-        spore.y -= spore.rise * dt;
-        spore.x += Math.sin(elapsed * 0.6 + spore.phase) * spore.drift * dt;
-        if (spore.y < -8) {
-          spore.y = height + 8;
-          spore.x = Math.random() * width;
-        }
-      }
-
-      sparks = sparks.filter((spark) => {
-        spark.life -= dt;
-        spark.x += spark.vx * dt;
-        spark.y += spark.vy * dt;
-        spark.vy += 6 * dt;
-        return spark.life > 0;
-      });
+      topology = buildTree({ width, height, seed, density });
+      sim = createSimulation(topology, { speed, seed });
+      buildGradient(topology);
     };
 
     /**
@@ -628,20 +251,24 @@ export default function GrowthTree({
      * the offscreen bloom buffer; the direct path paints over the backdrop.
      */
     const drawInto = (target: CanvasRenderingContext2D, clear: boolean): void => {
+      if (!topology || !sim) return;
+      const { byDepth, maxDepth } = topology;
+      const { branches, pulses, spores, sparks, elapsed } = sim;
+
       target.setTransform(dpr, 0, 0, dpr, 0, 0);
       if (clear) target.clearRect(0, 0, width, height);
       target.globalCompositeOperation = "lighter";
       target.lineCap = "round";
       target.lineJoin = "round";
 
-      const camera = scrollProgress * TUNING.cameraDrift;
+      const camera = scrollProgress * RENDER.cameraDrift;
       /** Vertical offset for a given depth. Everything anchored to a branch
        *  must use this so it scrolls with the branch, not against it. */
       const depthShift = (depth: number): number =>
-        camera + scrollProgress * TUNING.parallaxDepth * (depth / Math.max(1, maxDepth));
+        camera + scrollProgress * RENDER.parallaxDepth * (depth / Math.max(1, maxDepth));
       /** The tree recedes as the veil rolls in. Applied to branch-anchored
        *  passes only — the spores deliberately survive to carry the scene. */
-      const treeAlpha = 1 - scrollProgress * TUNING.veilTreeFade;
+      const treeAlpha = 1 - scrollProgress * RENDER.veilTreeFade;
 
       // Edges, one batched path per depth: shared width, alpha and parallax.
       for (let depth = 0; depth < byDepth.length; depth += 1) {
@@ -659,7 +286,7 @@ export default function GrowthTree({
         target.globalAlpha = (0.92 - 0.4 * depthT) * treeAlpha;
         target.lineWidth = Math.max(
           0.6,
-          TUNING.rootWidth * Math.pow(TUNING.widthFalloff, depth),
+          STRUCTURE.rootWidth * Math.pow(STRUCTURE.widthFalloff, depth),
         );
         target.shadowBlur = 0;
 
@@ -680,7 +307,7 @@ export default function GrowthTree({
       target.globalAlpha = treeAlpha;
       target.strokeStyle = rgba(colors.neon, 0.8);
       target.lineWidth = 1.6;
-      target.shadowBlur = TUNING.glowBlur * 1.4;
+      target.shadowBlur = RENDER.glowBlur * 1.4;
       target.shadowColor = rgba(colors.neon, 0.9);
       target.beginPath();
       for (const branch of branches) {
@@ -713,7 +340,9 @@ export default function GrowthTree({
           const branch = branches[index];
           if (!branch.active || branch.progress < 0.98) continue;
           const breath = branch.isTip
-            ? 1 + Math.sin(elapsed * TUNING.breathSpeed + branch.breathOffset) * TUNING.breathAmount
+            ? 1 +
+              Math.sin(elapsed * MOTION.breathSpeed + branch.breathOffset) *
+                MOTION.breathAmount
             : 1;
           const radius = Math.max(1, branch.width * 0.62) * breath;
           target.moveTo(branch.bx + radius, branch.by);
@@ -729,7 +358,7 @@ export default function GrowthTree({
       if (pulses.length > 0) {
         target.globalAlpha = treeAlpha;
         target.fillStyle = rgba(colors.core, 0.95);
-        target.shadowBlur = TUNING.glowBlur * 1.5;
+        target.shadowBlur = RENDER.glowBlur * 1.5;
         target.shadowColor = rgba(colors.neon, 1);
         target.beginPath();
         for (const pulse of pulses) {
@@ -752,8 +381,8 @@ export default function GrowthTree({
 
       // Ambient spores, bucketed into alpha tiers to keep the fill count low.
       target.shadowBlur = 0;
-      const sporeGain = 1 + scrollProgress * TUNING.veilSporeGain;
-      const sporeSwell = 1 + scrollProgress * TUNING.veilSporeSwell;
+      const sporeGain = 1 + scrollProgress * RENDER.veilSporeGain;
+      const sporeSwell = 1 + scrollProgress * RENDER.veilSporeSwell;
       for (let tier = 0; tier < 3; tier += 1) {
         target.fillStyle = rgba(colors.mid, Math.min(1, (0.18 + tier * 0.14) * sporeGain));
         target.beginPath();
@@ -774,7 +403,7 @@ export default function GrowthTree({
           target.beginPath();
           for (let i = tier; i < sparks.length; i += 3) {
             const spark = sparks[i];
-            const radius = 1.4 * (spark.life / TUNING.sparkLifeSeconds);
+            const radius = 1.4 * (spark.life / MOTION.sparkLifeSeconds);
             if (radius <= 0) continue;
             target.moveTo(spark.x + radius, spark.y);
             target.arc(spark.x, spark.y, radius, 0, Math.PI * 2);
@@ -793,20 +422,21 @@ export default function GrowthTree({
      * frame was two of the most expensive operations in the loop.
      */
     const bakeBackdrops = (): void => {
-      const bw = Math.max(1, Math.round(width * TUNING.backdropScale));
-      const bh = Math.max(1, Math.round(height * TUNING.backdropScale));
-      const scale = TUNING.backdropScale;
+      if (!topology) return;
+      const bw = Math.max(1, Math.round(width * RENDER.backdropScale));
+      const bh = Math.max(1, Math.round(height * RENDER.backdropScale));
+      const scale = RENDER.backdropScale;
 
       glowCanvas.width = bw;
       glowCanvas.height = bh;
       glowCtx.clearRect(0, 0, bw, bh);
-      const glowRadius = Math.min(width, height) * TUNING.groundGlowRadius * scale;
+      const glowRadius = Math.min(width, height) * RENDER.groundGlowRadius * scale;
       const glow = glowCtx.createRadialGradient(
-        rootX * scale,
-        rootY * scale,
+        topology.rootX * scale,
+        topology.rootY * scale,
         0,
-        rootX * scale,
-        rootY * scale,
+        topology.rootX * scale,
+        topology.rootY * scale,
         glowRadius,
       );
       glow.addColorStop(0, rgba(colors.deep, 0.55));
@@ -828,7 +458,7 @@ export default function GrowthTree({
         vignetteRadius,
       );
       vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
-      vignette.addColorStop(1, `rgba(0, 0, 0, ${TUNING.vignetteStrength})`);
+      vignette.addColorStop(1, `rgba(0, 0, 0, ${RENDER.vignetteStrength})`);
       vignetteCtx.fillStyle = vignette;
       vignetteCtx.fillRect(0, 0, bw, bh);
 
@@ -859,22 +489,23 @@ export default function GrowthTree({
      * everything else.
      */
     const drawVeil = (): void => {
-      if (scrollProgress <= 0.002) return;
-      const radius = Math.min(width, height) * TUNING.veilBlobRadius;
+      if (!sim || scrollProgress <= 0.002) return;
+      const radius = Math.min(width, height) * RENDER.veilBlobRadius;
+      const elapsed = sim.elapsed;
 
       ctx.globalCompositeOperation = "source-over";
-      for (let i = 0; i < TUNING.veilBlobs; i += 1) {
+      for (let i = 0; i < RENDER.veilBlobs; i += 1) {
         const phase = i * 1.7;
         const x =
-          width * (0.12 + 0.78 * ((i + 0.5) / TUNING.veilBlobs)) +
-          Math.sin(elapsed * TUNING.veilDriftSpeed + phase) * width * 0.07;
+          width * (0.12 + 0.78 * ((i + 0.5) / RENDER.veilBlobs)) +
+          Math.sin(elapsed * RENDER.veilDriftSpeed + phase) * width * 0.07;
         // Sits below the fold at rest and climbs into frame with scroll.
         const y =
           height * (1.15 - 0.85 * scrollProgress) +
-          Math.cos(elapsed * TUNING.veilDriftSpeed * 0.8 + phase) * height * 0.05 +
+          Math.cos(elapsed * RENDER.veilDriftSpeed * 0.8 + phase) * height * 0.05 +
           ((i % 3) - 1) * height * 0.16;
         ctx.globalAlpha =
-          scrollProgress * TUNING.veilStrength * (0.5 + 0.5 * Math.abs(Math.sin(phase)));
+          scrollProgress * RENDER.veilStrength * (0.5 + 0.5 * Math.abs(Math.sin(phase)));
         ctx.drawImage(mistCanvas, x - radius, y - radius, radius * 2, radius * 2);
       }
       ctx.globalAlpha = 1;
@@ -888,7 +519,7 @@ export default function GrowthTree({
       ctx.fillRect(0, 0, width, height);
 
       // Ground glow rides the camera, so it is blitted with the scroll offset.
-      const camera = scrollProgress * TUNING.cameraDrift;
+      const camera = scrollProgress * RENDER.cameraDrift;
       ctx.drawImage(glowCanvas, 0, camera, width, height);
 
       if (bloomOn) {
@@ -898,18 +529,18 @@ export default function GrowthTree({
 
         bloomCtx.setTransform(1, 0, 0, 1, 0, 0);
         bloomCtx.clearRect(0, 0, bloomCanvas.width, bloomCanvas.height);
-        bloomCtx.filter = `blur(${TUNING.bloomBlur}px)`;
+        bloomCtx.filter = `blur(${RENDER.bloomBlur}px)`;
         bloomCtx.drawImage(sceneCanvas, 0, 0, bloomCanvas.width, bloomCanvas.height);
         bloomCtx.filter = "none";
 
         ctx.globalCompositeOperation = "lighter";
-        ctx.globalAlpha = TUNING.bloomStrength;
+        ctx.globalAlpha = RENDER.bloomStrength;
         ctx.drawImage(bloomCanvas, 0, 0, width, height);
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = "source-over";
       } else {
-        // No bloom: skip the offscreen buffer entirely and draw straight to
-        // the visible canvas, which saves a full-resolution blit per frame.
+        // No bloom: skip the offscreen buffer entirely and draw straight to the
+        // visible canvas, which saves a full-resolution blit per frame.
         drawInto(ctx, false);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.globalCompositeOperation = "source-over";
@@ -920,17 +551,9 @@ export default function GrowthTree({
       ctx.drawImage(vignetteCanvas, 0, 0, width, height);
     };
 
-    /** Fast-forwards to a fully grown tree for the reduced-motion frame. */
-    const settle = (): void => {
-      const dt = 1 / 60;
-      const steps = Math.ceil(((TUNING.growthSeconds / speedScale) * 1.6 + 1) * 60);
-      for (let i = 0; i < steps; i += 1) step(dt);
-      pulses = [];
-      sparks = [];
-    };
-
     const frame = (now: number): void => {
       frameId = requestAnimationFrame(frame);
+      if (!sim) return;
       // Clamp so a backgrounded tab does not resume with one enormous delta.
       const dt = Math.min(0.05, (now - lastTime) / 1000 || 0);
       lastTime = now;
@@ -939,22 +562,22 @@ export default function GrowthTree({
       // Cap the render rate, and back off further while scrolling so the main
       // thread is free for the DOM. Simulation time still accumulates
       // accurately, so growth and wind run at the same speed — fewer frames.
-      const scrolling = now - lastScrollAt < TUNING.scrollQuietMs;
-      const frameInterval = 1 / (scrolling ? TUNING.scrollFps : TUNING.targetFps);
+      const scrolling = now - lastScrollAt < RENDER.scrollQuietMs;
+      const frameInterval = 1 / (scrolling ? RENDER.scrollFps : RENDER.targetFps);
       if (pending < frameInterval) return;
 
       const started = performance.now();
-      step(pending);
-      solve(elapsed, true);
+      sim.step(pending);
+      sim.solve(sim.elapsed, true);
       draw();
       pending = 0;
 
       // One-way quality degrade: if the device is consistently missing the
       // budget, drop bloom rather than keep stuttering.
       if (bloomOn) {
-        if (performance.now() - started > TUNING.slowFrameMs) {
+        if (performance.now() - started > RENDER.slowFrameMs) {
           slowFrames += 1;
-          if (slowFrames > TUNING.slowFrameLimit) bloomOn = false;
+          if (slowFrames > RENDER.slowFrameLimit) bloomOn = false;
         } else if (slowFrames > 0) {
           slowFrames -= 1;
         }
@@ -976,9 +599,10 @@ export default function GrowthTree({
 
     const render = (): void => {
       stop();
+      if (!sim) return;
       if (reduceMotion.matches) {
-        settle();
-        solve(0, false);
+        sim.settle();
+        sim.solve(0, false);
         draw();
         return;
       }
@@ -986,9 +610,9 @@ export default function GrowthTree({
     };
 
     /**
-     * Cached so the scroll handler never touches layout. Reading
-     * `scrollHeight` per scroll event forces a synchronous reflow, which is
-     * the single worst thing you can do on a scroll listener.
+     * Cached so the scroll handler never touches layout. Reading `scrollHeight`
+     * per scroll event forces a synchronous reflow, which is the single worst
+     * thing you can do on a scroll listener.
      */
     const measureScrollRange = (): void => {
       scrollRange = document.documentElement.scrollHeight - window.innerHeight;
@@ -1009,32 +633,34 @@ export default function GrowthTree({
 
       width = nextWidth;
       height = nextHeight;
-      const dprCap =
-        width < TUNING.mobileBreakpoint ? TUNING.mobileDpr : TUNING.maxDpr;
+      const dprCap = width < MOBILE_BREAKPOINT ? RENDER.mobileDpr : RENDER.maxDpr;
       dpr = Math.min(window.devicePixelRatio || 1, dprCap);
 
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
       sceneCanvas.width = canvas.width;
       sceneCanvas.height = canvas.height;
-      bloomCanvas.width = Math.max(1, Math.round(canvas.width * TUNING.bloomScale));
-      bloomCanvas.height = Math.max(1, Math.round(canvas.height * TUNING.bloomScale));
+      bloomCanvas.width = Math.max(1, Math.round(canvas.width * RENDER.bloomScale));
+      bloomCanvas.height = Math.max(1, Math.round(canvas.height * RENDER.bloomScale));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       plant();
       bakeBackdrops();
       measureScrollRange();
-      solve(0, false);
+      sim?.solve(0, false);
       render();
     };
 
-    const replant = (): void => {
-      seed = (seed + 0x9e3779b9) >>> 0;
-      plant();
-      solve(0, false);
-      render();
+    const onSurge = (): void => {
+      sim?.surge();
     };
 
+    /**
+     * A click shakes the canopy. It used to replant the tree from a fresh
+     * random seed — but a deterministic shape is the point of the content-
+     * derived tree, so the interaction became a gust instead: same tree,
+     * disturbed air, blowing away from wherever you clicked.
+     */
     const onPointerDown = (event: PointerEvent): void => {
       // The layer is pointer-events:none, so this listens on the window. Clicks
       // on interactive elements or inside the content column are left alone.
@@ -1047,7 +673,9 @@ export default function GrowthTree({
       ) {
         return;
       }
-      replant();
+      if (!sim || !topology) return;
+      const direction = event.clientX < topology.rootX ? 1 : -1;
+      sim.gust(RENDER.clickGust * direction);
     };
 
     /**
@@ -1098,7 +726,7 @@ export default function GrowthTree({
 
     window.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("scroll", readScroll, { passive: true });
-    window.addEventListener(TREE_SURGE_EVENT, surge);
+    window.addEventListener(TREE_SURGE_EVENT, onSurge);
     document.addEventListener("visibilitychange", onVisibility);
     reduceMotion.addEventListener("change", onMotionChange);
 
@@ -1113,11 +741,11 @@ export default function GrowthTree({
       intersectionObserver.disconnect();
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("scroll", readScroll);
-      window.removeEventListener(TREE_SURGE_EVENT, surge);
+      window.removeEventListener(TREE_SURGE_EVENT, onSurge);
       document.removeEventListener("visibilitychange", onVisibility);
       reduceMotion.removeEventListener("change", onMotionChange);
     };
-  }, [density, speed, colors]);
+  }, [density, speed, seed, colors]);
 
   return (
     <div
