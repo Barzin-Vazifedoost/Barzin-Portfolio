@@ -9,6 +9,7 @@ import {
 } from "@/lib/tree-events";
 import { MOBILE_BREAKPOINT, STRUCTURE, buildTree, type TreeTopology } from "@/lib/tree/build";
 import { graftContent, type Graft, type GraftEntry } from "@/lib/tree/graft";
+import { GROWTH_TREE_PALETTE, type GrowthTreePalette } from "@/lib/tree/palette";
 import {
   MOTION,
   branchControl,
@@ -34,26 +35,6 @@ import { clamp, easeOut } from "@/lib/tree/math";
  * the entries and the focused slug are read through refs: changing where you
  * are must never replant the tree.
  */
-
-export type GrowthTreePalette = {
-  bg: string;
-  /** Emerald — roots. */
-  deep: string;
-  /** Mid canopy. */
-  mid: string;
-  /** Growing edge, pulses, glow. */
-  neon: string;
-  /** Mint — tips and node cores. */
-  core: string;
-};
-
-export const GROWTH_TREE_PALETTE: GrowthTreePalette = {
-  bg: "#050805",
-  deep: "#0a3d1a",
-  mid: "#1a7a3a",
-  neon: "#39ff14",
-  core: "#c8ffdb",
-};
 
 /**
  * Used when no seed is supplied. A constant rather than `Math.random()`: the

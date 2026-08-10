@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 
-import type { GrowthTreePalette } from "@/components/growth-tree";
+import type { GrowthTreePalette } from "@/lib/tree/palette";
 import { illuminateTree } from "@/lib/tree-events";
 import type { GraftEntry } from "@/lib/tree/graft";
 import { readRoute, type TreeSection } from "@/lib/tree/route";
