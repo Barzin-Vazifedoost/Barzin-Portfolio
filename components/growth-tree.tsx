@@ -11,10 +11,20 @@ import { MOBILE_BREAKPOINT, STRUCTURE, buildTree, type TreeTopology } from "@/li
 import { graftContent, type Graft, type GraftEntry } from "@/lib/tree/graft";
 import { GROWTH_TREE_PALETTE, type GrowthTreePalette } from "@/lib/tree/palette";
 import {
+  LIQUID,
+  bodyMass,
+  hasMass,
+  neckBreakFor,
+  neckGlow,
+  neckWidth,
+  nodeMass,
+} from "@/lib/tree/liquid";
+import {
   MOTION,
   branchControl,
   createSimulation,
   pointOnBranch,
+  type SimBranch,
   type Simulation,
 } from "@/lib/tree/simulate";
 import { createSeparation, solveSeparation, type Separation } from "@/lib/tree/split";
@@ -127,6 +137,28 @@ const RENDER = {
    *  strokes are all halo and no filament. */
   filamentRatio: 0.34,
   filamentMinWidth: 0.75,
+
+  // ── Liquid ───────────────────────────────────────────────────────────────
+  /** Buffer scale for the mass pass. The output is a soft, thresholded shape
+   *  with no fine detail in it, so it survives being rendered at half size and
+   *  blitted up — and the blur, which is the expensive part, then costs a
+   *  quarter of what it would at full resolution. */
+  liquidScale: 0.5,
+  /** Blur radius in *buffer* pixels, and the contrast that turns the blurred
+   *  mass back into a hard edge. Together these are the fusion: raise the blur
+   *  and separate masses reach further to find each other; raise the contrast
+   *  and the edge between fused and not gets sharper.
+   *
+   *  The blur is the reach, so it has to stay well under the spacing of the
+   *  branches it applies to or everything within it fuses into one shape. At
+   *  half scale, 3 buffer pixels is 6 CSS pixels of reach against joints tens
+   *  of pixels apart. */
+  liquidBlur: 3,
+  liquidContrast: 14,
+  /** Strength of the mass under the crisp geometry. The strokes stay exactly as
+   *  they were — this is volume added beneath them, not a replacement for them,
+   *  which is what keeps the tree legible. */
+  liquidStrength: 0.62,
 
   // ── Performance ──────────────────────────────────────────────────────────
   /** Render cap. Sub-60 judder on a continuously moving canvas reads as motion
@@ -275,13 +307,47 @@ export default function GrowthTree({
     // then blitted up once — see `veilScale`.
     const veilCanvas = document.createElement("canvas");
     const veilCtx = veilCanvas.getContext("2d");
-    if (!sceneCtx || !bloomCtx || !glowCtx || !vignetteCtx || !mistCtx || !veilCtx) return;
+    /**
+     * The liquid pass, in two buffers.
+     *
+     * `goo` holds the raw mass — white blobs and capsules on black. `gooOut`
+     * holds it after `blur` + `contrast`, which is what fuses touching mass into
+     * one shape with a hard edge, and then after a `multiply` tint that turns
+     * the white mask back into the tree's own green.
+     *
+     * Two buffers rather than one because `contrast` acts on colour, not alpha:
+     * the threshold only works against an opaque ground, so the mask has to be
+     * built and thresholded somewhere that is not the scene.
+     */
+    const gooCanvas = document.createElement("canvas");
+    const gooCtx = gooCanvas.getContext("2d");
+    const gooOutCanvas = document.createElement("canvas");
+    const gooOutCtx = gooOutCanvas.getContext("2d");
+    if (
+      !sceneCtx ||
+      !bloomCtx ||
+      !glowCtx ||
+      !vignetteCtx ||
+      !mistCtx ||
+      !veilCtx ||
+      !gooCtx ||
+      !gooOutCtx
+    )
+      return;
 
     /** Turned off permanently if the device cannot keep up. */
     let bloomOn = typeof sceneCtx.filter === "string";
     /** Multiplier on `bloomScale`, stepped down before bloom is dropped. */
     let bloomQuality = 1;
+    /**
+     * The liquid needs `ctx.filter` for its blur and threshold. Where that is
+     * missing the tree simply renders as it did before — crisp strokes, no
+     * mass — which is a complete picture, not a broken one.
+     */
+    let liquidOn = typeof gooCtx.filter === "string";
     let slowFrames = 0;
+    /** Counted separately from `slowFrames`: the two budgets watch different frames. */
+    let slowLiquidFrames = 0;
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -407,6 +473,123 @@ export default function GrowthTree({
      * Draws the luminous half of the frame. `clear` is set when rendering into
      * the offscreen bloom buffer; the direct path paints over the backdrop.
      */
+    /**
+     * The liquid pass: the tree as mass rather than line.
+     *
+     * Fills `gooOut` with a fused, hard-edged, tinted shape covering the whole
+     * tree — nodes as blobs, branches as capsules joining them, and a neck
+     * across every joint that the scroll separation has started to pull open.
+     * Nothing is stroked in the tree's own colours here; the mask is white on
+     * black because `contrast` thresholds colour, and it is tinted at the end.
+     *
+     * Returns false when there is nothing to composite.
+     */
+    const drawGoo = (lite: boolean): boolean => {
+      if (!topology || !sim || !liquidOn) return false;
+      const paint = colorsRef.current;
+      const { byDepth, maxDepth } = topology;
+      const { branches, pulses, elapsed } = sim;
+
+      const scale = RENDER.liquidScale;
+      gooCtx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+      // Opaque ground: the threshold below works on colour, so the buffer must
+      // not be transparent anywhere.
+      gooCtx.fillStyle = "#000";
+      gooCtx.fillRect(0, 0, width, height);
+      gooCtx.translate(panX, panY);
+      gooCtx.lineCap = "round";
+      gooCtx.lineJoin = "round";
+      gooCtx.fillStyle = "#fff";
+      gooCtx.strokeStyle = "#fff";
+      // Under 1 so a lone shape sits below the threshold and only overlaps fuse.
+      gooCtx.globalAlpha = LIQUID.massAlpha;
+
+      const camera = scrollProgress * RENDER.cameraDrift;
+      const offX = (branch: SimBranch): number => separation.x[branch.index];
+      const offY = (branch: SimBranch): number =>
+        separation.y[branch.index] +
+        camera +
+        scrollProgress * RENDER.parallaxDepth * (branch.depth / Math.max(1, maxDepth));
+
+      const curveScale = 1 - separation.progress * RENDER.splitStraighten;
+
+      // Bodies, batched per depth exactly as the strokes are — one path, one
+      // stroke, per depth level.
+      for (let depth = 0; depth < byDepth.length && depth <= LIQUID.maxDepth; depth += 1) {
+        const indices = byDepth[depth];
+        if (!indices || indices.length === 0) continue;
+
+        gooCtx.beginPath();
+        let drew = false;
+        for (const index of indices) {
+          const branch = branches[index];
+          if (!branch.active || branch.progress <= 0) continue;
+          const ox = offX(branch);
+          const oy = offY(branch);
+          const { cx, cy } = branchControl(branch, curveScale);
+          gooCtx.moveTo(branch.ax + ox, branch.ay + oy);
+          gooCtx.quadraticCurveTo(cx + ox, cy + oy, branch.bx + ox, branch.by + oy);
+          drew = true;
+        }
+        if (!drew) continue;
+        gooCtx.lineWidth = bodyMass(branches[indices[0]]);
+        gooCtx.stroke();
+      }
+
+      // Node blobs. One path for all of them — they are all the same colour.
+      const anchors = graft ? new Set(graft.anchors) : null;
+      gooCtx.beginPath();
+      for (const branch of branches) {
+        if (!branch.active || branch.progress < 0.98 || !hasMass(branch)) continue;
+        const breath = branch.isTip
+          ? 1 + Math.sin(elapsed * MOTION.breathSpeed + branch.breathOffset) * MOTION.breathAmount
+          : 1;
+        const radius = nodeMass(branch, breath, anchors?.has(branch.index) ?? false);
+        const x = branch.bx + offX(branch);
+        const y = branch.by + offY(branch);
+        gooCtx.moveTo(x + radius, y);
+        gooCtx.arc(x, y, radius, 0, Math.PI * 2);
+      }
+      gooCtx.fill();
+
+      /**
+       * A pulse displaces the liquid it is travelling through, so the branch
+       * swells around it and the swelling moves with it. Skipped on scroll
+       * frames, where the tree is capped to 20fps and a travelling bulge would
+       * read as a stutter rather than a flow.
+       */
+      if (!lite && pulses.length > 0) {
+        gooCtx.beginPath();
+        for (const pulse of pulses) {
+          const branch = branches[pulse.branch];
+          if (!branch || !hasMass(branch)) continue;
+          const point = pointOnBranch(branch, Math.min(1, pulse.t), curveScale);
+          const x = point.x + offX(branch);
+          const y = point.y + offY(branch);
+          const radius = LIQUID.pulseSwell * pulse.bright;
+          gooCtx.moveTo(x + radius, y);
+          gooCtx.arc(x, y, radius, 0, Math.PI * 2);
+        }
+        gooCtx.fill();
+      }
+
+      // Fuse and threshold, then tint the white mask back to the tree's green.
+      gooOutCtx.setTransform(1, 0, 0, 1, 0, 0);
+      gooOutCtx.globalCompositeOperation = "source-over";
+      gooOutCtx.globalAlpha = 1;
+      gooOutCtx.filter = `blur(${RENDER.liquidBlur}px) contrast(${RENDER.liquidContrast})`;
+      gooOutCtx.drawImage(gooCanvas, 0, 0);
+      gooOutCtx.filter = "none";
+      // Multiply leaves the black ground black — so it contributes nothing when
+      // the result is composited additively — and turns the mask into the tint.
+      gooOutCtx.globalCompositeOperation = "multiply";
+      gooOutCtx.fillStyle = rgba(paint.mid, 1);
+      gooOutCtx.fillRect(0, 0, gooOutCanvas.width, gooOutCanvas.height);
+      gooOutCtx.globalCompositeOperation = "source-over";
+
+      return true;
+    };
+
     const drawInto = (
       target: CanvasRenderingContext2D,
       clear: boolean,
@@ -519,6 +702,89 @@ export default function GrowthTree({
           target.quadraticCurveTo(cx + ox, cy + oy, branch.bx + ox, branch.by + oy);
           target.stroke();
         }
+        target.shadowBlur = 0;
+      }
+
+      /**
+       * Surface tension across every joint the scroll separation has opened.
+       *
+       * This is the liquid the tree is actually made of. Each joint is spanned
+       * by an hourglass: flush with the parent's tip at one end, flush with the
+       * child's base at the other, pinched in the middle — which is the shape a
+       * liquid bridge actually takes when it is pulled. Drawn as a filled taper
+       * rather than a stroked line because a straight stroke between two points
+       * reads as a wire kinking round a corner, not as something being stretched.
+       *
+       * Bucketed into three alpha tiers so the whole canopy costs three fills
+       * instead of one per joint, the same way the spores are batched.
+       *
+       * Costs nothing while the tree is whole: `separation.progress` is 0 for
+       * the entire hero, and this block does not run.
+       */
+      if (separation.progress > 0) {
+        target.shadowBlur = bloomed ? 0 : RENDER.glowBlur;
+        target.shadowColor = rgba(paint.neon, 0.9);
+
+        for (let tier = 0; tier < 3; tier += 1) {
+          const tierLow = tier / 3;
+          const tierHigh = (tier + 1) / 3;
+          target.fillStyle = rgba(paint.core, 1);
+          target.globalAlpha = ((tierLow + tierHigh) / 2) * treeAlpha;
+
+          target.beginPath();
+          let drew = false;
+
+          for (const branch of branches) {
+            if (branch.parent === -1 || !branch.active || branch.progress <= 0) continue;
+            const parent = branches[branch.parent];
+            if (!parent.active || parent.progress <= 0) continue;
+
+            const px = parent.bx + offX(parent);
+            const py = parent.by + offY(parent);
+            const cx2 = branch.ax + offX(branch);
+            const cy2 = branch.ay + offY(branch);
+            const dx = cx2 - px;
+            const dy = cy2 - py;
+            const gap = Math.hypot(dx, dy);
+            if (gap <= 0.01) continue;
+
+            const breakAt = neckBreakFor(branch);
+            const glow = neckGlow(gap, breakAt);
+            if (glow < tierLow || glow >= tierHigh) continue;
+
+            // Unit normal to the span: the taper is measured across it.
+            const nx = -dy / gap;
+            const ny = dx / gap;
+
+            const halfParent = bodyMass(parent) * 0.5;
+            const halfChild = bodyMass(branch) * 0.5;
+            const halfPinch = neckWidth(gap, breakAt, bodyMass(parent), bodyMass(branch)) * 0.5;
+            const mx = px + dx * 0.5;
+            const my = py + dy * 0.5;
+
+            // Down one side, back up the other. The control point at the waist
+            // is what curves the sides in instead of chamfering them.
+            target.moveTo(px + nx * halfParent, py + ny * halfParent);
+            target.quadraticCurveTo(
+              mx + nx * halfPinch,
+              my + ny * halfPinch,
+              cx2 + nx * halfChild,
+              cy2 + ny * halfChild,
+            );
+            target.lineTo(cx2 - nx * halfChild, cy2 - ny * halfChild);
+            target.quadraticCurveTo(
+              mx - nx * halfPinch,
+              my - ny * halfPinch,
+              px - nx * halfParent,
+              py - ny * halfParent,
+            );
+            target.closePath();
+            drew = true;
+          }
+
+          if (drew) target.fill();
+        }
+
         target.shadowBlur = 0;
       }
 
@@ -679,6 +945,16 @@ export default function GrowthTree({
       bloomCanvas.height = Math.max(1, Math.round(canvas.height * scale));
     };
 
+    /** Both liquid buffers, sized together — they are blitted one into the other. */
+    const sizeLiquid = (): void => {
+      const w = Math.max(1, Math.round(canvas.width * RENDER.liquidScale));
+      const h = Math.max(1, Math.round(canvas.height * RENDER.liquidScale));
+      gooCanvas.width = w;
+      gooCanvas.height = h;
+      gooOutCanvas.width = w;
+      gooOutCanvas.height = h;
+    };
+
     /**
      * Bakes the ground glow and vignette once per resize — and once per palette
      * change, since the glow is tinted. Both are smooth radial gradients over
@@ -816,6 +1092,20 @@ export default function GrowthTree({
       ctx.drawImage(glowCanvas, panX, camera + panY, width, height);
 
       /**
+       * The liquid body goes down first, under everything the tree draws in
+       * line. The strokes, the filament and the nodes then land on top of it
+       * unchanged — so the mass adds volume and fused joints without costing
+       * the geometry any of the sharpness it was tuned for.
+       */
+      if (drawGoo(lite)) {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = RENDER.liquidStrength;
+        ctx.drawImage(gooOutCanvas, 0, 0, width, height);
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = "source-over";
+      }
+
+      /**
        * Whether a real bloom pass runs over this frame. Bloom costs three
        * screen-sized passes — the scene blit, the blurred downscale and the
        * additive composite — so it is dropped in three cases:
@@ -898,20 +1188,44 @@ export default function GrowthTree({
       //
       // Scroll and mobile frames are excluded: both already skip bloom, so
       // timing them would measure a cheaper frame than the one being judged.
+      const frameCost = performance.now() - started;
+
+      // Bloom's ladder, unchanged: halve the buffer, then drop the glow. Scroll
+      // and mobile frames are excluded because both already skip bloom, so
+      // timing them would judge it on a frame it did not run in.
       if (bloomOn && !scrolling && !isMobile) {
-        if (performance.now() - started > RENDER.slowFrameMs) {
+        if (frameCost > RENDER.slowFrameMs) {
           slowFrames += 1;
           if (slowFrames > RENDER.slowFrameLimit) {
+            slowFrames = 0;
             if (bloomQuality > 0.5) {
               bloomQuality = 0.5;
               sizeBloom();
-              slowFrames = 0;
             } else {
               bloomOn = false;
             }
           }
         } else if (slowFrames > 0) {
           slowFrames -= 1;
+        }
+      }
+
+      /**
+       * The liquid needs its own budget, judged on *every* frame including
+       * scrolling ones. Bloom is excluded from scroll frames because it does
+       * not run in them — but the liquid does, and the separation means scroll
+       * frames are the expensive ones. Measuring it only when the page is still
+       * would have left the one case that can actually miss budget invisible.
+       *
+       * Dropped after bloom because it is the cheaper of the two, and losing it
+       * leaves the tree as line work, which is still a complete picture.
+       */
+      if (liquidOn) {
+        if (frameCost > RENDER.slowFrameMs) {
+          slowLiquidFrames += 1;
+          if (slowLiquidFrames > RENDER.slowFrameLimit) liquidOn = false;
+        } else if (slowLiquidFrames > 0) {
+          slowLiquidFrames -= 1;
         }
       }
     };
@@ -980,6 +1294,7 @@ export default function GrowthTree({
       sceneCanvas.width = canvas.width;
       sceneCanvas.height = canvas.height;
       sizeBloom();
+      sizeLiquid();
       veilCanvas.width = Math.max(1, Math.round(canvas.width * RENDER.veilScale));
       veilCanvas.height = Math.max(1, Math.round(canvas.height * RENDER.veilScale));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
