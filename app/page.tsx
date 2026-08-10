@@ -1,4 +1,5 @@
 import HomeScene, { type SceneItem } from "@/components/home-scene";
+import { PersonJsonLd } from "@/components/json-ld";
 import { getFeaturedProjects, getProjects } from "@/lib/content/projects";
 import { getPosts, getRecentPosts } from "@/lib/content/posts";
 import { formatDate } from "@/lib/format";
@@ -33,13 +34,16 @@ export default async function HomePage() {
   // The tree itself — its shape, density and content anchors — is assembled
   // once in the root layout, so this page only describes itself.
   return (
-    <HomeScene
-      name={site.name}
-      tagline={site.tagline}
-      description={site.description}
-      projects={projects}
-      posts={posts}
-      counts={{ projects: allProjects.length, posts: allPosts.length }}
-    />
+    <>
+      <PersonJsonLd />
+      <HomeScene
+        name={site.name}
+        tagline={site.tagline}
+        description={site.description}
+        projects={projects}
+        posts={posts}
+        counts={{ projects: allProjects.length, posts: allPosts.length }}
+      />
+    </>
   );
 }

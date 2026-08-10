@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { BlogPostingJsonLd } from "@/components/json-ld";
 import { Mdx } from "@/components/mdx";
 import { PageShell } from "@/components/page-shell";
+import QuietLink from "@/components/quiet-link";
 import { getPost, getPostSlugs } from "@/lib/content/posts";
 import { formatDate, isoDate } from "@/lib/format";
 import { slugify } from "@/lib/slugify";
@@ -54,6 +56,14 @@ export default async function PostPage({ params }: PageProps) {
       width="prose"
       aside={`${readingTimeMinutes} min`}
     >
+      <BlogPostingJsonLd
+        title={frontmatter.title}
+        description={frontmatter.summary}
+        slug={slug}
+        published={frontmatter.date}
+        modified={frontmatter.updated}
+        tags={frontmatter.tags}
+      />
       <article>
         <div className="mb-12 flex flex-wrap items-center gap-x-5 gap-y-2">
           <p className="meta">
@@ -88,16 +98,7 @@ export default async function PostPage({ params }: PageProps) {
         <Mdx source={body} />
 
         <footer className="mt-20 border-t border-[var(--deep)]/60 pt-8">
-          <Link
-            href="/blog"
-            className="eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
-          >
-            ← All posts
-            <span
-              aria-hidden="true"
-              className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-            />
-          </Link>
+          <QuietLink href="/blog">← All posts</QuietLink>
         </footer>
       </article>
     </PageShell>

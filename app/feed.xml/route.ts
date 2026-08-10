@@ -1,6 +1,13 @@
 import { getPosts } from "@/lib/content/posts";
 import { absoluteUrl, site } from "@/lib/site";
 
+/**
+ * The feed's inputs are MDX files read at build time, so there is nothing to
+ * recompute per request. Without this it was the only server-rendered route on
+ * an otherwise entirely static site.
+ */
+export const dynamic = "force-static";
+
 function escapeXml(value: string): string {
   return value
     .replace(/&/g, "&amp;")

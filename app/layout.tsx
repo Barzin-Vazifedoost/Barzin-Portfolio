@@ -7,18 +7,32 @@ import TreeBackdrop from "@/components/tree-backdrop";
 import { getTreeContent } from "@/lib/content/tree";
 import { site } from "@/lib/site";
 
+/**
+ * Three families load on first paint, so each one asks for only what it uses.
+ *
+ * Fraunces carries `wght`, `SOFT`, `WONK` and an optical-size axis; the design
+ * uses weight and optical sizing and nothing else, so `axes` drops the other
+ * two rather than shipping them. Weight ranges are narrowed for the same
+ * reason — a variable font still carries every master it was built with.
+ */
+
 /** Display voice: a variable serif with optical sizing — organic, not a UI grotesk. */
 const fraunces = Fraunces({
   variable: "--font-fraunces",
   subsets: ["latin"],
   display: "swap",
+  // No `weight` here on purpose: `axes` is only accepted alongside a variable
+  // weight, and weight is the one axis this design does vary. Naming `opsz`
+  // keeps optical sizing and drops SOFT and WONK.
+  axes: ["opsz"],
 });
 
-/** The engineer voice: eyebrows, dates, counts. */
+/** The engineer voice: eyebrows, dates, counts. Uppercase, one weight. */
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
   display: "swap",
+  weight: ["400", "500"],
 });
 
 /** Body copy stays deliberately quiet. */
@@ -26,6 +40,7 @@ const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
   display: "swap",
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {

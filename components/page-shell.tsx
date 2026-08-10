@@ -68,30 +68,5 @@ export function PageShell({
   );
 }
 
-/** Quiet mono link with an underline that draws itself on hover. */
-export function QuietLink({
-  href,
-  children,
-  external = false,
-}: {
-  href: string;
-  children: ReactNode;
-  external?: boolean;
-}) {
-  const className =
-    "eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]";
-
-  return (
-    <a
-      href={href}
-      className={className}
-      {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
-    >
-      {children}
-      <span
-        aria-hidden="true"
-        className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-      />
-    </a>
-  );
-}
+// QuietLink used to live here, exported and imported by nothing. It is now
+// components/quiet-link.tsx, and the seven places that reimplemented it use it.

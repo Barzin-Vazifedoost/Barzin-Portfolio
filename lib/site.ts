@@ -30,7 +30,7 @@ export const site = {
   url: siteUrl,
   email: "barzin.vazifedoost@gmail.com",
   socials: [
-    { label: "GitHub", href: "https://github.com/TODO" },
+    { label: "GitHub", href: "https://github.com/Barzin-Vazifedoost" },
     { label: "LinkedIn", href: "https://www.linkedin.com/in/TODO" },
   ] satisfies SocialLink[],
   nav: [

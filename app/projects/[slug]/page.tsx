@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { Mdx } from "@/components/mdx";
 import { PageShell } from "@/components/page-shell";
+import QuietLink from "@/components/quiet-link";
 import { getProject, getProjectSlugs } from "@/lib/content/projects";
 import { formatDate, isoDate } from "@/lib/format";
 
@@ -64,16 +64,7 @@ export default async function ProjectPage({ params }: PageProps) {
           <Mdx source={body} />
 
           <footer className="mt-20 border-t border-[var(--deep)]/60 pt-8">
-            <Link
-              href="/projects"
-              className="eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
-            >
-              ← All projects
-              <span
-                aria-hidden="true"
-                className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-              />
-            </Link>
+            <QuietLink href="/projects">← All projects</QuietLink>
           </footer>
         </div>
 
@@ -97,18 +88,9 @@ export default async function ProjectPage({ params }: PageProps) {
             <ul aria-label="Project links" className="mt-8 flex flex-col gap-3">
               {frontmatter.links.map((link) => (
                 <li key={link.href}>
-                  <a
-                    href={link.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
-                  >
+                  <QuietLink href={link.href} external>
                     {link.label} ↗
-                    <span
-                      aria-hidden="true"
-                      className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-                    />
-                  </a>
+                  </QuietLink>
                 </li>
               ))}
             </ul>

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bough, BranchHeading, BranchItem, Leaf } from "@/components/branch";
 import { PageShell } from "@/components/page-shell";
+import QuietLink from "@/components/quiet-link";
 import { getExperience, getResume, parseResumeMonth } from "@/lib/content/resume";
 import { formatMonthYear } from "@/lib/format";
 import { site } from "@/lib/site";
@@ -32,30 +33,11 @@ export default function ResumePage() {
       register="roots"
     >
       <div className="mb-16 flex flex-wrap gap-x-6 gap-y-3">
-        <a
-          href={`mailto:${site.email}`}
-          className="eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
-        >
-          {site.email}
-          <span
-            aria-hidden="true"
-            className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-          />
-        </a>
+        <QuietLink href={`mailto:${site.email}`}>{site.email}</QuietLink>
         {site.socials.map((social) => (
-          <a
-            key={social.href}
-            href={social.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
-          >
+          <QuietLink key={social.href} href={social.href}>
             {social.label} ↗
-            <span
-              aria-hidden="true"
-              className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--neon)] transition-transform duration-500 ease-[var(--ease-flow)] group-hover/link:scale-x-100"
-            />
-          </a>
+          </QuietLink>
         ))}
         {resume.pdfPath ? (
           <a
