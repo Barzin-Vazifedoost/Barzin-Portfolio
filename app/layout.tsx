@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Fraunces, Geist, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import SiteNav from "@/components/site-nav";
+import SiteYear from "@/components/site-year";
 import TreeBackdrop from "@/components/tree-backdrop";
 import { getTreeContent } from "@/lib/content/tree";
 import { site } from "@/lib/site";
@@ -90,26 +91,7 @@ export default async function RootLayout({
         </a>
 
         <header className="relative z-20 px-6 pt-6 sm:px-10">
-          <nav aria-label="Main" className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
-            <Link
-              href="/"
-              className="eyebrow text-[var(--text-dim)] transition-colors duration-300 hover:text-[var(--neon)]"
-            >
-              {site.name}
-            </Link>
-            <ul className="flex gap-x-5">
-              {site.nav.map((item) => (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className="eyebrow transition-colors duration-300 hover:text-[var(--neon)]"
-                  >
-                    {item.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </nav>
+          <SiteNav />
         </header>
 
         <main id="main" className="relative z-10 flex-1">
@@ -119,7 +101,7 @@ export default async function RootLayout({
         <footer className="relative z-20 mt-24 px-6 pb-10 sm:px-10">
           <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-3 border-t border-[var(--deep)] pt-6">
             <p className="meta">
-              © {new Date().getFullYear()} {site.name}
+              © <SiteYear /> {site.name}
             </p>
             <ul className="flex flex-wrap gap-x-5 gap-y-2">
               <li>

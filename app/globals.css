@@ -12,18 +12,35 @@
   --neon: #39ff14;
   --core: #c8ffdb;
 
+  /**
+   * The structural greens above are stops in the ramp: they stroke twigs, fill
+   * node dots, draw hairlines and tint gradients, and `--mid` is mirrored in
+   * the canvas palette. Set small text in one of them and you are picking a
+   * text colour by accident — `--mid` on an 11px uppercase label measured
+   * 3.73:1, well under the 4.5:1 AA needs below 18.66px.
+   *
+   * So the two roles are separate tokens. `--label` is the colour small mono
+   * text is set in and is answerable to contrast; `--mid` stays answerable to
+   * the artwork. Lifting `--mid` itself would have brightened every dot and
+   * every twig along with the type.
+   */
+  --label: #2fa855; /* 6.57:1 on --bg */
+
   /* Text ramp — quiet by default, accent reserved for labels and links. */
-  --text: #dcf5e4;
-  --text-dim: #8fae99;
-  --text-faint: #5d7566;
+  --text: #dcf5e4; /* 17.47:1 */
+  --text-dim: #8fae99; /* 8.32:1 */
+  --text-faint: #7d9686; /* 6.31:1 — was #5d7566 at 4.03:1, under AA */
 
   /* Type scale. Fluid, so the hero holds its presence down to mobile. */
   --step-hero: clamp(3rem, 9vw, 7.5rem);
   --step-tagline: clamp(1.25rem, 2.2vw, 1.9rem);
   --step-title: clamp(1.15rem, 1.5vw, 1.5rem);
   --step-body: clamp(0.95rem, 1vw, 1.05rem);
-  --step-eyebrow: 0.7rem;
-  --step-meta: 0.72rem;
+  /* 12px floor. Uppercase mono at 0.22em tracking is already hard work; the
+   * old 11.2/11.5px were the smallest type on the site and carried the whole
+   * navigation. */
+  --step-eyebrow: 0.75rem;
+  --step-meta: 0.75rem;
 
   /* One easing curve for every transition, CSS or JS. */
   --ease-flow: cubic-bezier(0.16, 1, 0.3, 1);
@@ -33,6 +50,7 @@
   --color-bg: var(--bg);
   --color-deep: var(--deep);
   --color-mid: var(--mid);
+  --color-label: var(--label);
   --color-neon: var(--neon);
   --color-core: var(--core);
   --color-text: var(--text);
@@ -54,9 +72,10 @@
   --mid: #9a7430;
   --neon: #e0a44a;
   --core: #f0dcb4;
-  --text: #ecdcc4;
-  --text-dim: #b9a488;
-  --text-faint: #8a7355;
+  --label: #b8903f; /* 6.80:1 */
+  --text: #ecdcc4; /* 15.62:1 */
+  --text-dim: #b9a488; /* 8.37:1 */
+  --text-faint: #a89070; /* 6.60:1 — was #8a7355 at 4.47:1, under AA */
 }
 
 html {
@@ -79,7 +98,7 @@ body {
   font-size: var(--step-eyebrow);
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--mid);
+  color: var(--label);
 }
 
 .meta {

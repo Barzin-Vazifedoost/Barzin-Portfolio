@@ -113,14 +113,20 @@ function Tendril({ index, active }: { index: number; active: boolean }) {
   );
 }
 
-/** Section label in the mono voice, with a node that lights as it scrolls in. */
-function Eyebrow({ children }: { children: string }) {
+/**
+ * Section label in the mono voice, with a node that lights as it scrolls in.
+ *
+ * This *is* the section's heading rather than a decoration sitting next to one.
+ * Both sections used to render a visually-hidden `<h2>` and then this label
+ * with the same string, so a screen reader announced every section twice.
+ */
+function Eyebrow({ id, children }: { id: string; children: string }) {
   const ref = useRef<HTMLDivElement>(null);
   // Fires slightly before the label reaches the viewport edge.
   const inView = useInView(ref, { once: true, margin: "-12% 0px -12% 0px" });
 
   return (
-    <div ref={ref} className="mb-8 flex items-center gap-3">
+    <h2 id={id} ref={ref} className="mb-8 flex items-center gap-3">
       <motion.span
         aria-hidden="true"
         data-reveal
@@ -147,7 +153,7 @@ function Eyebrow({ children }: { children: string }) {
         animate={inView ? { scaleX: 1 } : undefined}
         transition={{ duration: 1.1, ease: EASE, delay: 0.1 }}
       />
-    </div>
+    </h2>
   );
 }
 
@@ -220,7 +226,7 @@ function ItemCard({ item, index }: { item: SceneItem; index: number }) {
 /** Quiet mono link with the same drawing underline as item titles. */
 function TrailLink({ href, children }: { href: string; children: string }) {
   return (
-    <Link href={href} className="eyebrow group/link relative inline-block text-[var(--mid)]">
+    <Link href={href} className="eyebrow group/link relative inline-block text-[var(--label)]">
       <span className="transition-colors duration-500 ease-[var(--ease-flow)] group-hover/link:text-[var(--neon)]">
         {children}
       </span>
@@ -273,7 +279,10 @@ export default function HomeScene({
         <div className="lg:grid lg:grid-cols-[minmax(0,46%)_1fr]">
           <div>
             {/* ── Hero ───────────────────────────────────────────────── */}
-            <section className="flex min-h-[82vh] flex-col justify-center py-16">
+            {/* dvh, not vh: `vh` measures against the largest viewport, so with
+                the address bar showing the hero overflowed and the scroll cue
+                sat below the fold on mobile. */}
+            <section className="flex min-h-[82dvh] flex-col justify-center py-16">
               <motion.p
                 className="eyebrow mb-8"
                 data-reveal
@@ -358,10 +367,7 @@ export default function HomeScene({
 
             {/* ── Selected work ──────────────────────────────────────── */}
             <section aria-labelledby="featured-projects" className="py-20">
-              <h2 id="featured-projects" className="sr-only">
-                Selected work
-              </h2>
-              <Eyebrow>Selected work</Eyebrow>
+              <Eyebrow id="featured-projects">Selected work</Eyebrow>
 
               {projects.length === 0 ? (
                 <p className="text-[var(--text-dim)]">No featured projects yet.</p>
@@ -380,10 +386,7 @@ export default function HomeScene({
 
             {/* ── Recent writing ─────────────────────────────────────── */}
             <section aria-labelledby="recent-writing" className="py-20">
-              <h2 id="recent-writing" className="sr-only">
-                Recent writing
-              </h2>
-              <Eyebrow>Recent writing</Eyebrow>
+              <Eyebrow id="recent-writing">Recent writing</Eyebrow>
 
               {posts.length === 0 ? (
                 <p className="text-[var(--text-dim)]">No posts yet.</p>

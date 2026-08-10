@@ -34,7 +34,7 @@ export default function ResumePage() {
       <div className="mb-16 flex flex-wrap gap-x-6 gap-y-3">
         <a
           href={`mailto:${site.email}`}
-          className="eyebrow group/link relative inline-block text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
+          className="eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
         >
           {site.email}
           <span
@@ -48,7 +48,7 @@ export default function ResumePage() {
             href={social.href}
             target="_blank"
             rel="noopener noreferrer"
-            className="eyebrow group/link relative inline-block text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
+            className="eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
           >
             {social.label} ↗
             <span
@@ -73,10 +73,7 @@ export default function ResumePage() {
       </div>
 
       <section aria-labelledby="experience" className="mb-20">
-        <h2 id="experience" className="sr-only">
-          Experience
-        </h2>
-        <BranchHeading>Experience</BranchHeading>
+        <BranchHeading id="experience">Experience</BranchHeading>
 
         <Bough as="ol" register="roots">
           {experience.map((role, index) => (
@@ -131,10 +128,7 @@ export default function ResumePage() {
       </section>
 
       <section aria-labelledby="education" className="mb-20">
-        <h2 id="education" className="sr-only">
-          Education
-        </h2>
-        <BranchHeading>Education</BranchHeading>
+        <BranchHeading id="education">Education</BranchHeading>
 
         <Bough as="ol" register="roots">
           {resume.education.map((entry, index) => (
@@ -167,10 +161,7 @@ export default function ResumePage() {
       </section>
 
       <section aria-labelledby="skills">
-        <h2 id="skills" className="sr-only">
-          Skills
-        </h2>
-        <BranchHeading>Skills</BranchHeading>
+        <BranchHeading id="skills">Skills</BranchHeading>
 
         <dl className="grid gap-px overflow-hidden rounded-sm bg-[var(--deep)]/60 sm:grid-cols-2">
           {resume.skills.map((group) => (

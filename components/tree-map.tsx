@@ -186,7 +186,7 @@ export default function TreeMap({ rootId, nodes, orders }: TreeMapProps) {
             {node.title}
           </Link>
         ) : (
-          <span className={`meta ${isActive ? "text-[var(--mid)]" : ""}`}>{node.id}</span>
+          <span className={`meta ${isActive ? "text-[var(--label)]" : ""}`}>{node.id}</span>
         )}
 
         {node.children.length > 0 ? (
@@ -216,7 +216,7 @@ export default function TreeMap({ rootId, nodes, orders }: TreeMapProps) {
           <kbd>h</kbd> parent · <kbd>l</kbd> child · <kbd>j</kbd> <kbd>k</kbd> siblings ·{" "}
           <kbd>g</kbd> root · <kbd>↵</kbd> open
         </p>
-        <p className="meta ml-auto text-[var(--mid)]" aria-live="polite">
+        <p className="meta ml-auto text-[var(--label)]" aria-live="polite">
           {trail.join(" · ")}
         </p>
       </div>

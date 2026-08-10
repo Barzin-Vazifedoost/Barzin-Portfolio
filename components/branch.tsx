@@ -136,10 +136,14 @@ export function Leaf({
 /**
  * Section heading: a node on the trunk with a branch running off it. Replaces
  * the dot-plus-rule that every section used to open with.
+ *
+ * This is the real `<h2>`, so a section labels itself with the heading you can
+ * see. Pages used to pair a visually-hidden `<h2>` with this, which announced
+ * every section title twice and listed each one twice in the heading outline.
  */
-export function BranchHeading({ children }: { children: ReactNode }) {
+export function BranchHeading({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <div className="mb-8 flex items-center gap-3">
+    <h2 id={id} className="mb-8 flex items-center gap-3">
       <span
         aria-hidden="true"
         className="block h-1.5 w-1.5 rounded-full bg-[var(--neon)] shadow-[0_0_12px_var(--neon)]"
@@ -166,6 +170,6 @@ export function BranchHeading({ children }: { children: ReactNode }) {
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-    </div>
+    </h2>
   );
 }

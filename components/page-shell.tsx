@@ -79,7 +79,7 @@ export function QuietLink({
   external?: boolean;
 }) {
   const className =
-    "eyebrow group/link relative inline-block text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]";
+    "eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]";
 
   return (
     <a

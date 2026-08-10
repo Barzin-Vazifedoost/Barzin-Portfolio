@@ -44,7 +44,7 @@ function heading(Tag: "h2" | "h3" | "h4") {
           {children}
           <span
             aria-hidden="true"
-            className="ml-3 text-[var(--mid)] opacity-0 transition-opacity duration-300 ease-[var(--ease-flow)] group-hover:opacity-100"
+            className="ml-3 text-[var(--label)] opacity-0 transition-opacity duration-300 ease-[var(--ease-flow)] group-hover:opacity-100"
           >
             #
           </span>
@@ -73,7 +73,7 @@ export const mdxComponents = {
     <ul className="my-5 flex flex-col gap-2.5" {...props} />
   ),
   ol: (props: ComponentPropsWithoutRef<"ol">) => (
-    <ol className="my-5 flex list-decimal flex-col gap-2.5 pl-5 marker:text-[var(--mid)]" {...props} />
+    <ol className="my-5 flex list-decimal flex-col gap-2.5 pl-5 marker:text-[var(--label)]" {...props} />
   ),
   li: (props: ComponentPropsWithoutRef<"li">) => (
     <li

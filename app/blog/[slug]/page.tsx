@@ -90,7 +90,7 @@ export default async function PostPage({ params }: PageProps) {
         <footer className="mt-20 border-t border-[var(--deep)]/60 pt-8">
           <Link
             href="/blog"
-            className="eyebrow group/link relative inline-block text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
+            className="eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
           >
             ← All posts
             <span

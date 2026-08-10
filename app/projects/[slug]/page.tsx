@@ -66,7 +66,7 @@ export default async function ProjectPage({ params }: PageProps) {
           <footer className="mt-20 border-t border-[var(--deep)]/60 pt-8">
             <Link
               href="/projects"
-              className="eyebrow group/link relative inline-block text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
+              className="eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
             >
               ← All projects
               <span
@@ -101,7 +101,7 @@ export default async function ProjectPage({ params }: PageProps) {
                     href={link.href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="eyebrow group/link relative inline-block text-[var(--mid)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
+                    className="eyebrow group/link relative inline-block text-[var(--label)] transition-colors duration-500 ease-[var(--ease-flow)] hover:text-[var(--neon)]"
                   >
                     {link.label} ↗
                     <span
