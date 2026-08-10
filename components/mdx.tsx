@@ -1,4 +1,5 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { MDXRemote } from "next-mdx-remote/rsc";
 import { slugify } from "@/lib/slugify";
@@ -106,7 +107,7 @@ export const mdxComponents = {
   // the page, and the inner <code> drops the inline pill styling.
   pre: (props: ComponentPropsWithoutRef<"pre">) => (
     <pre
-      className="my-8 overflow-x-auto rounded-sm border border-[var(--deep)]/70 bg-[#040604] p-5 font-mono text-[0.82rem] leading-relaxed text-[var(--text-dim)] [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-inherit"
+      className="my-8 overflow-x-auto rounded-sm border border-[var(--deep)]/70 bg-[var(--bg-sunken)] p-5 font-mono text-[0.82rem] leading-relaxed text-[var(--text-dim)] [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-inherit"
       {...props}
     />
   ),
@@ -126,10 +127,76 @@ export const mdxComponents = {
     <td className="border-b border-[var(--deep)]/40 px-3 py-2 text-[var(--text-dim)]" {...props} />
   ),
 
-  img: (props: ComponentPropsWithoutRef<"img">) => (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img className="my-8 h-auto max-w-full rounded-sm" alt="" {...props} />
-  ),
+  /**
+   * Images in prose.
+   *
+   * This was a raw `<img>` with no dimensions, so the first screenshot in a
+   * case study would have shipped unoptimised, unsized and eager — an
+   * unbounded payload plus a layout shift as it landed.
+   *
+   * `next/image` needs intrinsic dimensions, and it cannot measure a plain
+   * string path the way a static import is measured at build time. Markdown's
+   * `![alt](src)` has nowhere to put a width, so the normal path is `fill`
+   * inside a 16/9 box: the space is reserved before the image arrives, which
+   * is what removes the layout shift. The sized branch below is for the case
+   * where dimensions are supplied; verified working, the ratio box is what
+   * markdown-authored images actually take.
+   *
+   * `alt=""` stays ahead of the spread so an authored alt overrides it, and an
+   * unannotated image is correctly announced as decorative rather than having
+   * its filename read out.
+   */
+  img: ({ src, width, height, ...props }: ComponentPropsWithoutRef<"img">) => {
+    if (typeof src !== "string" || src.length === 0) return null;
+
+    // Remote images would need a `next.config` allowlist to be optimised, and
+    // silently failing the build on an unconfigured host is worse than serving
+    // one image unoptimised — so those keep the plain element.
+    const isRemote = /^https?:\/\//i.test(src);
+
+    if (isRemote) {
+      return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          className="my-8 h-auto max-w-full rounded-sm"
+          alt=""
+          loading="lazy"
+          decoding="async"
+          src={src}
+          width={width}
+          height={height}
+          {...props}
+        />
+      );
+    }
+
+    if (width && height) {
+      return (
+        <Image
+          className="my-8 h-auto max-w-full rounded-sm"
+          alt=""
+          src={src}
+          width={Number(width)}
+          height={Number(height)}
+          sizes="(min-width: 768px) 68ch, 100vw"
+          {...props}
+        />
+      );
+    }
+
+    return (
+      <span className="relative my-8 block aspect-[16/9] w-full overflow-hidden rounded-sm">
+        <Image
+          alt=""
+          src={src}
+          fill
+          sizes="(min-width: 768px) 68ch, 100vw"
+          style={{ objectFit: "cover" }}
+          {...props}
+        />
+      </span>
+    );
+  },
 
   a: ({ href = "", children, ...props }: AnchorProps) => {
     const className =

@@ -7,6 +7,8 @@
 :root {
   --bg: #050805;
   --bg-raised: #08110a;
+  /* Recessed: code blocks sit below the page rather than on it. */
+  --bg-sunken: #040604;
   --deep: #0a3d1a;
   --mid: #1a7a3a;
   --neon: #39ff14;
