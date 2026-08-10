@@ -121,7 +121,7 @@ function Tendril({ index, active }: { index: number; active: boolean }) {
  * with the same string, so a screen reader announced every section twice.
  */
 function Eyebrow({ id, children }: { id: string; children: string }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLHeadingElement>(null);
   // Fires slightly before the label reaches the viewport edge.
   const inView = useInView(ref, { once: true, margin: "-12% 0px -12% 0px" });
 
