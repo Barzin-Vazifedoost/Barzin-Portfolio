@@ -43,6 +43,22 @@
   --font-display: var(--font-fraunces);
 }
 
+/**
+ * Underground. A tree has a whole second half and the site used to pretend it
+ * didn't: history, training, the things that fed the rest. Same structure, same
+ * components, different light — every one of them reads the tokens, so this one
+ * class turns a page over.
+ */
+.register-roots {
+  --deep: #3b2a12;
+  --mid: #9a7430;
+  --neon: #e0a44a;
+  --core: #f0dcb4;
+  --text: #ecdcc4;
+  --text-dim: #b9a488;
+  --text-faint: #8a7355;
+}
+
 html {
   background: var(--bg);
   color-scheme: dark;

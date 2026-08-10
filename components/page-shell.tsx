@@ -20,6 +20,12 @@ export type PageShellProps = {
   aside?: ReactNode;
   /** Wider measure for index pages; prose width for reading. */
   width?: "prose" | "wide";
+  /**
+   * Which half of the tree this page belongs to. `roots` swaps the palette
+   * tokens for the underground register — every component below reads them, so
+   * nothing else has to know.
+   */
+  register?: "canopy" | "roots";
   children: ReactNode;
 };
 
@@ -29,10 +35,11 @@ export function PageShell({
   lead,
   aside,
   width = "wide",
+  register = "canopy",
   children,
 }: PageShellProps) {
   return (
-    <div className="relative">
+    <div className={`relative ${register === "roots" ? "register-roots" : ""}`}>
       <div
         className={`mx-auto px-6 pb-24 pt-16 sm:px-10 ${
           width === "prose" ? "max-w-[68ch]" : "max-w-5xl"

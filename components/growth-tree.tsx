@@ -103,6 +103,14 @@ const RENDER = {
   /** Peak opacity of a single mist blob. */
   veilStrength: 0.62,
   veilBlobs: 7,
+  /** The blobs are composited into a quarter-scale buffer and blitted up once.
+   *  Blending them straight onto the canvas meant seven screen-sized alpha
+   *  blends per frame — invisible on a GPU that accelerates it, and the single
+   *  biggest cost on the page everywhere else. Because it engages only once
+   *  `scrollProgress` leaves zero, it showed up precisely as "the frame rate
+   *  collapses when I scroll". Mist is a soft gradient, so rendering it small
+   *  loses nothing. */
+  veilScale: 0.25,
   /** Blob radius as a fraction of the viewport's smaller axis. */
   veilBlobRadius: 0.62,
   veilDriftSpeed: 0.07,
@@ -111,38 +119,56 @@ const RENDER = {
   veilSporeSwell: 0.6,
 
   // ── Render ───────────────────────────────────────────────────────────────
-  /** Bloom buffer scale and blur radius, in buffer pixels. */
-  bloomScale: 0.3,
-  bloomBlur: 8,
-  bloomStrength: 0.9,
-  /** Shadow radius, used only on the few small bright passes. */
-  glowBlur: 10,
-  vignetteStrength: 0.72,
+  /** Bloom buffer scale and blur radius, in buffer pixels.
+   *
+   *  These three numbers decide whether the tree reads sharp or out of focus. A
+   *  low-resolution buffer with a wide blur, composited back at near-full
+   *  strength, means most of the visible light is a smeared upscale and no
+   *  stroke appears to have an edge. A higher-resolution buffer with a tight
+   *  blur at moderate strength keeps the halo hugging the geometry, which is
+   *  what "glowing" should look like. */
+  bloomScale: 0.5,
+  bloomBlur: 4,
+  bloomStrength: 0.5,
+  /** Shadow radius for the small bright passes. Only applied when bloom is
+   *  off: stacking a shadow underneath the bloom blurs the same pixels twice. */
+  glowBlur: 9,
+  vignetteStrength: 0.58,
   groundGlowRadius: 0.55,
   /** Backdrop gradients are baked once at this scale, then upscaled. The bake
    *  happens on resize only and the per-frame cost is a blit either way, so
    *  this is set for fidelity (low values band visibly) rather than speed. */
-  backdropScale: 0.5,
+  backdropScale: 0.75,
+
+  /** A hard, bright centre line drawn inside each branch, as a fraction of the
+   *  branch's own width. A crisp core inside a soft glow is what makes a
+   *  luminous line read as sharp instead of smeared — without it, the widest
+   *  strokes are all halo and no filament. */
+  filamentRatio: 0.34,
+  filamentMinWidth: 0.75,
 
   // ── Performance ──────────────────────────────────────────────────────────
-  /** Render cap. Ambient motion reads fine well below 60, and this is the
-   *  single biggest saving on a busy page. */
-  targetFps: 30,
+  /** Render cap. Sub-60 judder on a continuously moving canvas reads as motion
+   *  blur, so this is deliberately at refresh rate; the adaptive degrade below
+   *  is what protects slower devices. */
+  targetFps: 60,
   /** Reduced cap while the user is actively scrolling: the main thread is busy
    *  with the DOM then, and the tree is not what is being looked at. */
-  scrollFps: 18,
+  scrollFps: 20,
   /** How long after the last scroll event to keep using `scrollFps`. */
   scrollQuietMs: 180,
   /** A frame slower than this counts against the quality budget. */
-  slowFrameMs: 22,
-  /** Consecutive slow frames before bloom is dropped. One-way. */
+  slowFrameMs: 20,
+  /** Slow frames before quality is stepped down. One-way, two stages: the
+   *  bloom buffer is halved first, and only then dropped entirely. */
   slowFrameLimit: 40,
 
   // ── Budgets ──────────────────────────────────────────────────────────────
-  /** Well below retina on purpose: the canvas is a soft, bloomed glow, so
-   *  extra pixels buy almost nothing visible and cost a lot. */
-  maxDpr: 1.25,
-  mobileDpr: 1,
+  /** Full device pixels. Anything below the display's own ratio makes the
+   *  browser upsample every stroke, which is the most visible source of
+   *  softness there is — no amount of bloom tuning recovers from it. */
+  maxDpr: 2,
+  mobileDpr: 1.5,
 
   // ── Interaction ──────────────────────────────────────────────────────────
   /** Strength of the gust a click sends through the canopy. */
@@ -264,10 +290,16 @@ export default function GrowthTree({
     // One soft blob, baked once and reused for every mist puff.
     const mistCanvas = document.createElement("canvas");
     const mistCtx = mistCanvas.getContext("2d");
-    if (!sceneCtx || !bloomCtx || !glowCtx || !vignetteCtx || !mistCtx) return;
+    // The mist blobs are blended together here, at a fraction of the scale,
+    // then blitted up once — see `veilScale`.
+    const veilCanvas = document.createElement("canvas");
+    const veilCtx = veilCanvas.getContext("2d");
+    if (!sceneCtx || !bloomCtx || !glowCtx || !vignetteCtx || !mistCtx || !veilCtx) return;
 
     /** Turned off permanently if the device cannot keep up. */
     let bloomOn = typeof sceneCtx.filter === "string";
+    /** Multiplier on `bloomScale`, stepped down before bloom is dropped. */
+    let bloomQuality = 1;
     let slowFrames = 0;
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -275,6 +307,8 @@ export default function GrowthTree({
     let width = 0;
     let height = 0;
     let dpr = 1;
+    /** Drives both the DPR cap and the bloom skip — see `draw`. */
+    let isMobile = false;
     let topology: TreeTopology | null = null;
     let sim: Simulation | null = null;
     let graft: Graft | null = null;
@@ -392,7 +426,12 @@ export default function GrowthTree({
      * Draws the luminous half of the frame. `clear` is set when rendering into
      * the offscreen bloom buffer; the direct path paints over the backdrop.
      */
-    const drawInto = (target: CanvasRenderingContext2D, clear: boolean): void => {
+    const drawInto = (
+      target: CanvasRenderingContext2D,
+      clear: boolean,
+      lite: boolean,
+      bloomed: boolean,
+    ): void => {
       if (!topology || !sim) return;
       const paint = colorsRef.current;
       const { byDepth, maxDepth } = topology;
@@ -429,22 +468,21 @@ export default function GrowthTree({
       // A tree bends; a diagram does not. The bend relaxes out as it separates.
       const curveScale = 1 - separation.progress * RENDER.splitStraighten;
 
+
       // Edges, still one batched path per depth — the offsets are baked into
       // the coordinates rather than applied as a transform, so the batching
-      // survives separation.
+      // survives separation. Each depth is stroked twice from that single path:
+      // once wide for the body, once narrow for the filament down its centre.
       for (let depth = 0; depth < byDepth.length; depth += 1) {
         const indices = byDepth[depth];
         if (!indices || indices.length === 0) continue;
 
         const depthT = depth / Math.max(1, maxDepth);
-
-        target.strokeStyle = trunkGradient ?? rgba(paint.mid, 1);
-        // Atmospheric dimming: distance into the canopy fades out.
-        target.globalAlpha = (0.92 - 0.4 * depthT) * treeAlpha;
-        target.lineWidth = Math.max(
-          0.6,
+        const bodyWidth = Math.max(
+          0.8,
           STRUCTURE.rootWidth * Math.pow(STRUCTURE.widthFalloff, depth),
         );
+
         target.shadowBlur = 0;
 
         target.beginPath();
@@ -457,7 +495,27 @@ export default function GrowthTree({
           target.moveTo(branch.ax + ox, branch.ay + oy);
           target.quadraticCurveTo(cx + ox, cy + oy, branch.bx + ox, branch.by + oy);
         }
+
+        target.strokeStyle = trunkGradient ?? rgba(paint.mid, 1);
+        // Atmospheric dimming: distance into the canopy fades out. Shallower
+        // than a straight falloff, so far branches stay defined lines rather
+        // than dissolving into grey haze.
+        target.globalAlpha = (0.95 - 0.3 * depthT) * treeAlpha;
+        target.lineWidth = bodyWidth;
         target.stroke();
+
+        // The filament. Same path, so it is exactly centred; skipped once the
+        // body is thin enough to be its own core, and while scrolling, where a
+        // second full stroke pass buys sharpness nobody can see.
+        if (bodyWidth > 1.4 && !lite) {
+          target.strokeStyle = rgba(paint.core, 1);
+          target.globalAlpha = (0.5 - 0.24 * depthT) * treeAlpha;
+          target.lineWidth = Math.max(
+            RENDER.filamentMinWidth,
+            bodyWidth * RENDER.filamentRatio,
+          );
+          target.stroke();
+        }
       }
 
       // The path from the root to whatever you are reading — or to the link
@@ -466,7 +524,7 @@ export default function GrowthTree({
       if (litIndex !== -1) {
         target.globalAlpha = treeAlpha;
         target.strokeStyle = rgba(paint.neon, 0.9);
-        target.shadowBlur = RENDER.glowBlur * 1.6;
+        target.shadowBlur = bloomed ? 0 : RENDER.glowBlur * 1.6;
         target.shadowColor = rgba(paint.neon, 1);
         for (let i = litIndex; i !== -1; i = branches[i].parent) {
           const branch = branches[i];
@@ -486,9 +544,9 @@ export default function GrowthTree({
       // Bright leading edge of everything still growing. No global translate:
       // each head carries its own branch's parallax so it stays welded on.
       target.globalAlpha = treeAlpha;
-      target.strokeStyle = rgba(paint.neon, 0.8);
-      target.lineWidth = 1.6;
-      target.shadowBlur = RENDER.glowBlur * 1.4;
+      target.strokeStyle = rgba(paint.neon, 0.85);
+      target.lineWidth = 1.5;
+      target.shadowBlur = bloomed ? 0 : RENDER.glowBlur * 1.4;
       target.shadowColor = rgba(paint.neon, 0.9);
       target.beginPath();
       for (const branch of branches) {
@@ -523,7 +581,9 @@ export default function GrowthTree({
               Math.sin(elapsed * MOTION.breathSpeed + branch.breathOffset) *
                 MOTION.breathAmount
             : 1;
-          const radius = Math.max(1, branch.width * 0.62) * breath;
+          // Floor above 1px: a sub-pixel additive circle is a grey smudge, not
+          // a dot, which is what made the deepest nodes look like dirt.
+          const radius = Math.max(1.15, branch.width * 0.62) * breath;
           const x = branch.bx + offX(branch);
           const y = branch.by + offY(branch);
           target.moveTo(x + radius, y);
@@ -538,7 +598,7 @@ export default function GrowthTree({
       if (graft && graft.anchors.length > 0) {
         target.globalAlpha = treeAlpha;
         target.fillStyle = rgba(paint.core, 1);
-        target.shadowBlur = RENDER.glowBlur;
+        target.shadowBlur = bloomed ? 0 : RENDER.glowBlur;
         target.shadowColor = rgba(paint.neon, 0.9);
         target.beginPath();
         for (const index of graft.anchors) {
@@ -569,7 +629,7 @@ export default function GrowthTree({
       if (pulses.length > 0) {
         target.globalAlpha = treeAlpha;
         target.fillStyle = rgba(paint.core, 0.95);
-        target.shadowBlur = RENDER.glowBlur * 1.5;
+        target.shadowBlur = bloomed ? 0 : RENDER.glowBlur * 1.5;
         target.shadowColor = rgba(paint.neon, 1);
         target.beginPath();
         for (const pulse of pulses) {
@@ -626,6 +686,16 @@ export default function GrowthTree({
 
       target.restore();
       target.shadowBlur = 0;
+    };
+
+    /**
+     * Sizes the bloom buffer from the canvas and the current quality step.
+     * Called on resize and whenever the degrade lowers `bloomQuality`.
+     */
+    const sizeBloom = (): void => {
+      const scale = RENDER.bloomScale * bloomQuality;
+      bloomCanvas.width = Math.max(1, Math.round(canvas.width * scale));
+      bloomCanvas.height = Math.max(1, Math.round(canvas.height * scale));
     };
 
     /**
@@ -706,16 +776,25 @@ export default function GrowthTree({
     };
 
     /**
-     * Drifting mist that rolls up through the canopy as you scroll. Seven
-     * scaled blits of one cached blob — cheap enough to run alongside
-     * everything else.
+     * Drifting mist that rolls up through the canopy as you scroll.
+     *
+     * The blobs are composited into a quarter-scale buffer and blitted up once.
+     * Blending them straight onto the canvas meant seven screen-sized alpha
+     * blends per frame — invisible on a GPU that accelerates it, and the single
+     * biggest cost on the page everywhere else. Because it engages only once
+     * `scrollProgress` leaves zero, it showed up precisely as "the frame rate
+     * collapses when I scroll".
      */
     const drawVeil = (): void => {
       if (!sim || scrollProgress <= 0.002) return;
       const radius = Math.min(width, height) * RENDER.veilBlobRadius;
       const elapsed = sim.elapsed;
 
-      ctx.globalCompositeOperation = "source-over";
+      // The buffer is scaled so blob positions can stay in CSS pixels.
+      veilCtx.setTransform(dpr * RENDER.veilScale, 0, 0, dpr * RENDER.veilScale, 0, 0);
+      veilCtx.clearRect(0, 0, width, height);
+      veilCtx.globalCompositeOperation = "source-over";
+
       for (let i = 0; i < RENDER.veilBlobs; i += 1) {
         const phase = i * 1.7;
         const x =
@@ -726,14 +805,18 @@ export default function GrowthTree({
           height * (1.15 - 0.85 * scrollProgress) +
           Math.cos(elapsed * RENDER.veilDriftSpeed * 0.8 + phase) * height * 0.05 +
           ((i % 3) - 1) * height * 0.16;
-        ctx.globalAlpha =
+        veilCtx.globalAlpha =
           scrollProgress * RENDER.veilStrength * (0.5 + 0.5 * Math.abs(Math.sin(phase)));
-        ctx.drawImage(mistCanvas, x - radius, y - radius, radius * 2, radius * 2);
+        veilCtx.drawImage(mistCanvas, x - radius, y - radius, radius * 2, radius * 2);
       }
+
+      veilCtx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
+      ctx.drawImage(veilCanvas, 0, 0, width, height);
     };
 
-    const draw = (): void => {
+    const draw = (lite: boolean): void => {
       const paint = colorsRef.current;
       // Every path below reads separation, so it is refreshed here rather than
       // in the loop — the reduced-motion path repaints without a loop at all.
@@ -751,9 +834,28 @@ export default function GrowthTree({
       const camera = scrollProgress * RENDER.cameraDrift;
       ctx.drawImage(glowCanvas, panX, camera + panY, width, height);
 
-      if (bloomOn) {
-        // Render once into the scene buffer, then composite it twice.
-        drawInto(sceneCtx, true);
+      /**
+       * Whether a real bloom pass runs over this frame. Bloom costs three
+       * screen-sized passes — the scene blit, the blurred downscale and the
+       * additive composite — so it is dropped in three cases:
+       *
+       * - while scrolling, where the halo changes against a moving page and
+       *   nobody can see it;
+       * - on mobile, where the scrim covers the canopy almost entirely and the
+       *   three passes buy nothing at all;
+       * - permanently, once the adaptive degrade has given up on the device.
+       *
+       * The small bright passes carry a shadow that stands in for bloom, so
+       * this value is handed to `drawInto` rather than recomputed there —
+       * a frame that skips bloom must pick the shadow back up, and one that
+       * runs it must not, since stacking both blurs the same pixels twice.
+       */
+      const bloomed = bloomOn && !lite && !isMobile;
+
+      if (bloomed) {
+        // Render once into the scene buffer, then composite it twice: straight
+        // at 1:1 for the sharp image, then blurred and additive for the halo.
+        drawInto(sceneCtx, true, lite, bloomed);
         ctx.drawImage(sceneCanvas, 0, 0, width, height);
 
         bloomCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -770,7 +872,7 @@ export default function GrowthTree({
       } else {
         // No bloom: skip the offscreen buffer entirely and draw straight to the
         // visible canvas, which saves a full-resolution blit per frame.
-        drawInto(ctx, false);
+        drawInto(ctx, false, lite, bloomed);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.globalCompositeOperation = "source-over";
         ctx.globalAlpha = 1;
@@ -806,15 +908,27 @@ export default function GrowthTree({
 
       sim.step(pending);
       sim.solve(sim.elapsed, true);
-      draw();
+      draw(scrolling);
       pending = 0;
 
-      // One-way quality degrade: if the device is consistently missing the
-      // budget, drop bloom rather than keep stuttering.
-      if (bloomOn) {
+      // One-way quality degrade, in two stages: halve the bloom buffer first,
+      // and only drop the glow entirely if that still isn't enough. Sharpness
+      // is never traded away here — the full-resolution scene pass stays.
+      //
+      // Scroll and mobile frames are excluded: both already skip bloom, so
+      // timing them would measure a cheaper frame than the one being judged.
+      if (bloomOn && !scrolling && !isMobile) {
         if (performance.now() - started > RENDER.slowFrameMs) {
           slowFrames += 1;
-          if (slowFrames > RENDER.slowFrameLimit) bloomOn = false;
+          if (slowFrames > RENDER.slowFrameLimit) {
+            if (bloomQuality > 0.5) {
+              bloomQuality = 0.5;
+              sizeBloom();
+              slowFrames = 0;
+            } else {
+              bloomOn = false;
+            }
+          }
         } else if (slowFrames > 0) {
           slowFrames -= 1;
         }
@@ -846,7 +960,7 @@ export default function GrowthTree({
         panY = panTargetY;
         sim.settle();
         sim.solve(0, false);
-        draw();
+        draw(false);
         return;
       }
       start();
@@ -865,7 +979,7 @@ export default function GrowthTree({
       lastScrollAt = performance.now();
       scrollProgress = scrollRange > 0 ? clamp(window.scrollY / scrollRange, 0, 1) : 0;
       // With motion reduced there is no loop, so repaint on demand instead.
-      if (reduceMotion.matches) draw();
+      if (reduceMotion.matches) draw(false);
     };
 
     const resize = (): void => {
@@ -876,15 +990,17 @@ export default function GrowthTree({
 
       width = nextWidth;
       height = nextHeight;
-      const dprCap = width < MOBILE_BREAKPOINT ? RENDER.mobileDpr : RENDER.maxDpr;
+      isMobile = width < MOBILE_BREAKPOINT;
+      const dprCap = isMobile ? RENDER.mobileDpr : RENDER.maxDpr;
       dpr = Math.min(window.devicePixelRatio || 1, dprCap);
 
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
       sceneCanvas.width = canvas.width;
       sceneCanvas.height = canvas.height;
-      bloomCanvas.width = Math.max(1, Math.round(canvas.width * RENDER.bloomScale));
-      bloomCanvas.height = Math.max(1, Math.round(canvas.height * RENDER.bloomScale));
+      sizeBloom();
+      veilCanvas.width = Math.max(1, Math.round(canvas.width * RENDER.veilScale));
+      veilCanvas.height = Math.max(1, Math.round(canvas.height * RENDER.veilScale));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       plant();
@@ -916,7 +1032,7 @@ export default function GrowthTree({
       // No loop under reduced motion, so repaint on demand.
       if (reduceMotion.matches) {
         readFocus();
-        draw();
+        draw(false);
       }
     };
 

@@ -6,7 +6,7 @@
  * target; later work will use it to resolve a node from a deep link.
  */
 
-export type TreeSection = "home" | "writing" | "work";
+export type TreeSection = "home" | "writing" | "work" | "roots";
 
 export type TreeRoute = {
   section: TreeSection;
@@ -19,11 +19,22 @@ export function readRoute(pathname: string): TreeRoute {
   if (segments.length === 0) return { section: "home", slug: null };
 
   const section: TreeSection =
-    segments[0] === "blog" ? "writing" : segments[0] === "projects" ? "work" : "home";
+    segments[0] === "blog"
+      ? "writing"
+      : segments[0] === "projects"
+        ? "work"
+        : // History lives underground. The resume is the root system.
+          segments[0] === "resume"
+          ? "roots"
+          : "home";
 
   // Exactly two segments is an entry page. `/blog/tags/meta` has three and must
-  // never be mistaken for a post called "tags".
-  const slug = section !== "home" && segments.length === 2 ? segments[1] : null;
+  // never be mistaken for a post called "tags". Only writing and work have
+  // entries; the resume is a single page.
+  const slug =
+    (section === "writing" || section === "work") && segments.length === 2
+      ? segments[1]
+      : null;
 
   return { section, slug };
 }

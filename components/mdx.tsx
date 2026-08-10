@@ -26,12 +26,20 @@ const HEADING_CLASS: Record<"h2" | "h3" | "h4", string> = {
 /**
  * Headings carry an id derived from their text, so every section is linkable.
  * The anchor itself only appears on hover, to keep the reading column clean.
+ *
+ * Each one also carries a node in the left margin, sized by level — an article
+ * is a branch, and its headings are the forks along it.
  */
 function heading(Tag: "h2" | "h3" | "h4") {
   const Heading = ({ children, id, ...props }: HeadingProps) => {
     const anchor = id ?? slugify(toText(children));
+    const node = Tag === "h2" ? "h-2 w-2" : Tag === "h3" ? "h-1.5 w-1.5" : "h-1 w-1";
     return (
-      <Tag id={anchor} className={`group ${HEADING_CLASS[Tag]}`} {...props}>
+      <Tag id={anchor} className={`group relative ${HEADING_CLASS[Tag]}`} {...props}>
+        <span
+          aria-hidden="true"
+          className={`absolute -left-6 top-[0.62em] hidden rounded-full bg-[var(--mid)] transition-all duration-500 ease-[var(--ease-flow)] group-hover:bg-[var(--neon)] group-hover:shadow-[0_0_10px_var(--neon)] sm:block ${node}`}
+        />
         <a href={`#${anchor}`} className="no-underline">
           {children}
           <span

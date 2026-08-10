@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Bough, BranchItem, Leaf } from "@/components/branch";
 import { PageShell } from "@/components/page-shell";
 import { getProjects } from "@/lib/content/projects";
 import { formatDate, isoDate } from "@/lib/format";
@@ -23,19 +24,13 @@ export default async function ProjectsPage() {
       {projects.length === 0 ? (
         <p className="text-[var(--text-dim)]">Nothing published yet.</p>
       ) : (
-        <ul className="border-l border-[var(--deep)]/60">
-          {projects.map(({ slug, frontmatter }) => (
-            <li key={slug} className="group relative">
+        <Bough>
+          {projects.map(({ slug, frontmatter }, index) => (
+            <BranchItem key={slug} index={index} total={projects.length}>
               <Link
                 href={`/projects/${slug}`}
-                className="block py-8 pl-8 transition-colors duration-500 ease-[var(--ease-flow)] hover:bg-[var(--mid)]/[0.04]"
+                className="block py-8 pl-10 transition-colors duration-500 ease-[var(--ease-flow)] hover:bg-[var(--mid)]/[0.04]"
               >
-                {/* Node on the spine. */}
-                <span
-                  aria-hidden="true"
-                  className="absolute left-0 top-[42px] block h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[var(--mid)] transition-all duration-500 ease-[var(--ease-flow)] group-hover:bg-[var(--neon)] group-hover:shadow-[0_0_14px_var(--neon)]"
-                />
-
                 <div className="flex flex-wrap items-baseline gap-x-4">
                   <h2 className="display text-[length:var(--step-title)] font-medium transition-colors duration-500 ease-[var(--ease-flow)] group-hover:text-[var(--core)]">
                     {frontmatter.title}
@@ -56,19 +51,16 @@ export default async function ProjectsPage() {
                 {frontmatter.stack.length > 0 ? (
                   <ul aria-label="Stack" className="mt-4 flex flex-wrap gap-2">
                     {frontmatter.stack.map((item) => (
-                      <li
-                        key={item}
-                        className="meta rounded-full border border-[var(--deep)] px-3 py-1 text-[var(--text-faint)] transition-colors duration-500 ease-[var(--ease-flow)] group-hover:border-[var(--mid)]/60"
-                      >
-                        {item}
+                      <li key={item}>
+                        <Leaf className="group-hover:border-[var(--mid)]/60">{item}</Leaf>
                       </li>
                     ))}
                   </ul>
                 ) : null}
               </Link>
-            </li>
+            </BranchItem>
           ))}
-        </ul>
+        </Bough>
       )}
     </PageShell>
   );

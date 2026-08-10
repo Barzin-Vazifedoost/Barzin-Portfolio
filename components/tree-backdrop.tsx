@@ -48,6 +48,14 @@ const SECTION_PALETTE: Record<TreeSection, Partial<GrowthTreePalette>> = {
     neon: "#6dff14",
     core: "#dcffc4",
   },
+  // Underground: the one place the site leaves green behind, because the roots
+  // are not the canopy and should not pretend to be.
+  roots: {
+    deep: "#3b2a12",
+    mid: "#9a7430",
+    neon: "#e0a44a",
+    core: "#f0dcb4",
+  },
 };
 
 /**

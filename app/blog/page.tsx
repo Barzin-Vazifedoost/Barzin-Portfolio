@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Bough, BranchItem, Leaf } from "@/components/branch";
 import { PageShell } from "@/components/page-shell";
 import { getPosts, getPostTags } from "@/lib/content/posts";
 import { formatDate, isoDate } from "@/lib/format";
@@ -27,10 +28,12 @@ export default async function BlogPage() {
               <li key={tag.slug}>
                 <Link
                   href={`/blog/tags/${tag.slug}`}
-                  className="meta inline-block rounded-full border border-[var(--deep)] px-3 py-1 text-[var(--text-faint)] transition-all duration-500 ease-[var(--ease-flow)] hover:border-[var(--mid)] hover:text-[var(--neon)]"
+                  className="group/leaf inline-block transition-colors duration-500"
                 >
-                  {tag.name}
-                  <span className="ml-2 text-[var(--text-faint)]">{tag.count}</span>
+                  <Leaf className="group-hover/leaf:border-[var(--mid)] group-hover/leaf:text-[var(--neon)]">
+                    {tag.name}
+                    <span className="ml-2 opacity-70">{tag.count}</span>
+                  </Leaf>
                 </Link>
               </li>
             ))}
@@ -41,18 +44,13 @@ export default async function BlogPage() {
       {posts.length === 0 ? (
         <p className="text-[var(--text-dim)]">Nothing published yet.</p>
       ) : (
-        <ul className="border-l border-[var(--deep)]/60">
-          {posts.map(({ slug, frontmatter, readingTimeMinutes }) => (
-            <li key={slug} className="group relative">
+        <Bough>
+          {posts.map(({ slug, frontmatter, readingTimeMinutes }, index) => (
+            <BranchItem key={slug} index={index} total={posts.length}>
               <Link
                 href={`/blog/${slug}`}
-                className="block py-8 pl-8 transition-colors duration-500 ease-[var(--ease-flow)] hover:bg-[var(--mid)]/[0.04]"
+                className="block py-8 pl-10 transition-colors duration-500 ease-[var(--ease-flow)] hover:bg-[var(--mid)]/[0.04]"
               >
-                <span
-                  aria-hidden="true"
-                  className="absolute left-0 top-[42px] block h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[var(--mid)] transition-all duration-500 ease-[var(--ease-flow)] group-hover:bg-[var(--neon)] group-hover:shadow-[0_0_14px_var(--neon)]"
-                />
-
                 <h2 className="display text-[length:var(--step-title)] font-medium transition-colors duration-500 ease-[var(--ease-flow)] group-hover:text-[var(--core)]">
                   {frontmatter.title}
                 </h2>
@@ -69,9 +67,9 @@ export default async function BlogPage() {
                   {frontmatter.summary}
                 </p>
               </Link>
-            </li>
+            </BranchItem>
           ))}
-        </ul>
+        </Bough>
       )}
     </PageShell>
   );

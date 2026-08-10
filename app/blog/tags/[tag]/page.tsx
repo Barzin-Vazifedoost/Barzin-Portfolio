@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { Bough, BranchItem } from "@/components/branch";
 import { PageShell } from "@/components/page-shell";
 import { getPostTags, getPostsByTag } from "@/lib/content/posts";
 import { formatDate, isoDate } from "@/lib/format";
@@ -40,18 +41,13 @@ export default async function TagPage({ params }: PageProps) {
       lead={`Everything filed under ${tag.name}.`}
       aside={`${posts.length} ${posts.length === 1 ? "post" : "posts"}`}
     >
-      <ul className="border-l border-[var(--deep)]/60">
-        {posts.map(({ slug, frontmatter, readingTimeMinutes }) => (
-          <li key={slug} className="group relative">
+      <Bough>
+        {posts.map(({ slug, frontmatter, readingTimeMinutes }, index) => (
+          <BranchItem key={slug} index={index} total={posts.length}>
             <Link
               href={`/blog/${slug}`}
-              className="block py-8 pl-8 transition-colors duration-500 ease-[var(--ease-flow)] hover:bg-[var(--mid)]/[0.04]"
+              className="block py-8 pl-10 transition-colors duration-500 ease-[var(--ease-flow)] hover:bg-[var(--mid)]/[0.04]"
             >
-              <span
-                aria-hidden="true"
-                className="absolute left-0 top-[42px] block h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[var(--mid)] transition-all duration-500 ease-[var(--ease-flow)] group-hover:bg-[var(--neon)] group-hover:shadow-[0_0_14px_var(--neon)]"
-              />
-
               <h2 className="display text-[length:var(--step-title)] font-medium transition-colors duration-500 ease-[var(--ease-flow)] group-hover:text-[var(--core)]">
                 {frontmatter.title}
               </h2>
@@ -68,9 +64,9 @@ export default async function TagPage({ params }: PageProps) {
                 {frontmatter.summary}
               </p>
             </Link>
-          </li>
+          </BranchItem>
         ))}
-      </ul>
+      </Bough>
 
       <div className="mt-12">
         <Link
