@@ -22,6 +22,9 @@ npm run lint       # eslint
 - `app/` — routes. Dynamic segments receive `params` as a **Promise**; always `await params`.
 - `content/` — authored content. `projects/*.mdx`, `blog/*.mdx`, and `resume.ts`.
 - `lib/content/` — the content layer. Reads `content/`, validates frontmatter, exposes typed queries.
+- `lib/tree/` — the growth tree, as pure data. `build.ts` (topology), `simulate.ts`
+  (motion), `graft.ts` (content → branches), `route.ts` (URL → node), `math.ts`.
+  No DOM, no canvas, no React — the canvas only renders what these produce.
 - `lib/site.ts` — name, URL, nav, socials. Change site-wide identity here, nowhere else.
 - `components/` — shared components.
 
@@ -35,6 +38,18 @@ npm run lint       # eslint
 - Never read from `content/` inside a route. Go through `lib/content/*`, which is
   `server-only` and wrapped in React `cache`.
 - Tag URLs use `slugify()` from `lib/slugify.ts`. Use it on both sides of any tag comparison.
+
+## Tree rules
+
+- The canopy's shape is derived from the content, not from chance. `lib/content/tree.ts`
+  hashes the published slugs into a seed. Never introduce `Math.random()` into the
+  topology — the tree's shape is the site's identity.
+- The canvas is mounted once, in the root layout, and must never unmount. Anything
+  that varies per route (palette, focused slug) is read through a ref inside the
+  render loop; putting it in the effect's dependencies replants the tree on every
+  navigation.
+- `lib/tree/*` stays free of DOM and React so the tree can be reasoned about — and
+  later rendered — off-screen.
 
 ## Conventions
 

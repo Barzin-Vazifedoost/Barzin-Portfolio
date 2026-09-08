@@ -81,6 +81,16 @@ body {
   letter-spacing: -0.02em;
 }
 
+/* Key hints. Small enough to sit inside a mono metadata line. */
+kbd {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: 0.9em;
+  border: 1px solid var(--deep);
+  border-radius: 3px;
+  padding: 0.05em 0.35em;
+  color: var(--text-dim);
+}
+
 /* Focus must stay obvious over a busy canvas. */
 :focus-visible {
   outline: 2px solid var(--neon);

@@ -2,8 +2,11 @@ import type { ReactNode } from "react";
 
 /**
  * Shared frame for every page that isn't the home scene. It carries the same
- * eyebrow → display title → lead structure and a static CSS aura, so inner
- * pages read as the same system without paying for a second canvas.
+ * eyebrow → display title → lead structure.
+ *
+ * It used to paint a static CSS aura as a stand-in for the home page's canvas.
+ * That is gone: the real tree now lives in the root layout and is behind this
+ * page too, so a second, fake glow would only fight it.
  *
  * Server component: no state, no effects, nothing to hydrate.
  */
@@ -30,16 +33,6 @@ export function PageShell({
 }: PageShellProps) {
   return (
     <div className="relative">
-      {/* Static counterpart to the home page's ground glow. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed inset-0 -z-10"
-        style={{
-          background:
-            "radial-gradient(120% 80% at 12% 0%, rgba(26,122,58,0.16) 0%, rgba(10,61,26,0.06) 38%, rgba(5,8,5,0) 72%)",
-        }}
-      />
-
       <div
         className={`mx-auto px-6 pb-24 pt-16 sm:px-10 ${
           width === "prose" ? "max-w-[68ch]" : "max-w-5xl"

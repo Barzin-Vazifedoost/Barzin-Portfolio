@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Fraunces, Geist, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import TreeBackdrop from "@/components/tree-backdrop";
+import { getTreeContent } from "@/lib/content/tree";
 import { site } from "@/lib/site";
 
 /** Display voice: a variable serif with optical sizing — organic, not a UI grotesk. */
@@ -53,17 +55,33 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Read once, here, so the tree outlives every route beneath it.
+  const { entries, seed, density } = await getTreeContent();
+
   return (
     <html
       lang={site.locale}
       className={`${geistSans.variable} ${jetbrainsMono.variable} ${fraunces.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">
+      {/*
+        Extensions such as Grammarly stamp attributes onto <body> before React
+        hydrates (`data-gr-ext-installed`, `data-new-gr-c-s-check-loaded`),
+        which React reports as a hydration mismatch. This suppresses the warning
+        for this element's own attributes only — one level deep, never its
+        children — so a genuine mismatch inside the page still surfaces.
+      */}
+      <body className="flex min-h-full flex-col" suppressHydrationWarning>
+        {/*
+          The one tree. Mounted above the route slot, so navigating moves the
+          camera instead of tearing the canvas down and regrowing it.
+        */}
+        <TreeBackdrop seed={seed} density={density} entries={entries} />
+
         <a
           href="#main"
           className="eyebrow sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:bg-[var(--bg-raised)] focus:px-3 focus:py-2 focus:text-[var(--core)]"

@@ -30,10 +30,8 @@ export default async function HomePage() {
     meta: `${formatDate(post.frontmatter.date)} · ${post.readingTimeMinutes} min`,
   }));
 
-  // The canopy grows with the portfolio.
-  const published = allProjects.length + allPosts.length;
-  const density = Math.min(1.8, 0.85 + published * 0.06);
-
+  // The tree itself — its shape, density and content anchors — is assembled
+  // once in the root layout, so this page only describes itself.
   return (
     <HomeScene
       name={site.name}
@@ -42,7 +40,6 @@ export default async function HomePage() {
       projects={projects}
       posts={posts}
       counts={{ projects: allProjects.length, posts: allPosts.length }}
-      density={density}
     />
   );
 }
